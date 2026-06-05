@@ -1,0 +1,50 @@
+# PINNACLE Configuration — Default (matching draft.tex)
+# Target: Biomedical Signal Processing and Control (BSPC)
+# ============================================================
+
+# Architecture
+model: "pinnacle"
+embed_dim: 128
+num_classes: 5
+dropout: 0.3
+use_fusion: true
+
+# Data
+seq_len: 1000
+img_size: 224
+data_dir: "data/"
+
+# Training (draft.tex Table 4)
+epochs: 30
+batch_size: 32
+lr: 0.001
+weight_decay: 0.0001
+scheduler: "cosine"
+
+# Augmentation
+use_augmentation: true
+
+# Regularisation
+ema_decay: 0.999
+grad_clip: 5.0
+early_stopping_patience: 12
+
+# Device
+device: "auto"       # auto-detect: mps > cpu
+use_amp: false        # Disabled for CPU/MPS
+num_workers: 0        # macOS requires 0 for MPS
+
+# Reproducibility
+seed: 42
+
+# Paths
+log_dir: "outputs/logs"
+checkpoint_dir: "outputs/checkpoints"
+figure_dir: "outputs/figures"
+
+# Wavelet generation
+wavelet:
+  type: "mexh"        # 'morl' (Morlet) or 'mexh' (Mexican Hat/Ricker)
+  n_scales: 256
+  img_size: 224
+  chunk_size: 100

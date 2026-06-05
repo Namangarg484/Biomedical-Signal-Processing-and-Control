@@ -1,0 +1,38 @@
+# ======================================================================
+# PINNACLE v2 — Residual-Gated SeparationCross (30-class)
+# ======================================================================
+# Same as 30class.yaml but outputs to a new directory
+# Uses the updated SeparationCross with residual gamma gate
+# ======================================================================
+
+data:
+  dir: "New data"
+  num_classes: 30
+  seq_len: 1000
+
+wavelet:
+  type: "morl"
+  n_scales: 256
+  img_size: 128
+  colormap: "viridis"
+
+model:
+  embed_dim: 128
+  dropout: 0.3
+  use_fusion: true
+
+training:
+  epochs: 50
+  batch_size: 32
+  lr: 0.001
+  weight_decay: 0.0001
+  scheduler: "cosine"
+  seed: 42
+  patience: 15
+  ema_decay: 0.999
+  grad_clip: 5.0
+
+output:
+  checkpoint_dir: "outputs_30class_v2/checkpoints"
+  log_dir: "outputs_30class_v2/logs"
+  figure_dir: "outputs_30class_v2/figures"

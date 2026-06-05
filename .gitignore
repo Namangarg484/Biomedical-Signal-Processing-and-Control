@@ -1,0 +1,24 @@
+# Data and testing
+data/
+New data/
+testing_data/
+processed_v2/
+
+# Logs and outputs
+outputs*/
+outputs/
+pinnacle_v17_logs_90plus/
+pinnacle_no_fusion_logs/
+pinnacle_raman_only_logs/
+*.log
+
+# Python
+__pycache__/
+*.pyc
+
+# Mac OS
+.DS_Store
+
+# Virtual environments if any
+venv/
+env/

@@ -1,0 +1,43 @@
+# ======================================================================
+# PINNACLE — 30-Class Taxonomy Training Configuration
+# ======================================================================
+# Dataset: Ho et al. 2019 extended 30-species Raman benchmark
+# Splits:  reference (60K train) / finetune (3K val) / test (3K test)
+# ======================================================================
+
+# --- Data ---
+data:
+  dir: "New data"
+  num_classes: 30
+  seq_len: 1000
+
+# --- Wavelet ---
+wavelet:
+  type: "morl"
+  n_scales: 256
+  img_size: 128        # 128×128 to keep wavelet files under 14 GB total
+  colormap: "viridis"
+
+# --- Model ---
+model:
+  embed_dim: 128
+  dropout: 0.3
+  use_fusion: true
+
+# --- Training ---
+training:
+  epochs: 50           # More epochs for 30-class complexity
+  batch_size: 32
+  lr: 0.001
+  weight_decay: 0.0001
+  scheduler: "cosine"
+  seed: 42
+  patience: 15         # Increased patience for harder task
+  ema_decay: 0.999
+  grad_clip: 5.0
+
+# --- Output ---
+output:
+  checkpoint_dir: "outputs_30class/checkpoints"
+  log_dir: "outputs_30class/logs"
+  figure_dir: "outputs_30class/figures"

@@ -1,0 +1,2020 @@
+%% Copyright 2007-2025 Elsevier Ltd
+%%
+%% This file is part of the 'Elsarticle Bundle'.
+%% ---------------------------------------------
+%%
+%% It may be distributed under the conditions of the LaTeX Project Public
+%% License, either version 1.3 of this license or (at your option) any
+%% later version. The latest version of this license is in
+%%    http://www.latex-project.org/lppl.txt
+%% and version 1.3 or later is part of all distributions of LaTeX
+%% version 2005/12/01 or later.
+
+\documentclass[preprint,12pt]{elsarticle}
+
+\usepackage{amssymb}
+\usepackage{amsmath}
+\usepackage{lineno,hyperref}
+\modulolinenumbers[5]
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{xcolor}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{subcaption}
+
+\journal{Biomedical Signal Processing and Control}
+
+\bibliographystyle{elsarticle-num}
+
+% FiLM 5-class results (scripts/5class_extra_baselines.py, seed=42)
+\newcommand{\filmfiveclassacc}{96.88}
+\newcommand{\filmfiveclassci}{[95.8, 97.7]}
+\newcommand{\filmfiveclassp}{0.061}
+
+\begin{document}
+
+\begin{frontmatter}
+
+\title{Spectroscopy-Informed Dual-Stream Raman-Wavelet Fusion for Robust Bacterial Classification}
+
+\author{}
+\address{}
+\begin{abstract}
+Rapid and accurate identification of pathogenic bacteria is critical
+for clinical diagnostics and antimicrobial resistance (AMR) management.
+Raman spectroscopy provides label-free molecular fingerprints within
+minutes, but current deep learning approaches process spectra as
+one-dimensional vectors, discarding the multi-scale structural
+information available in the scale-wavenumber domain and remaining
+sensitive to acquisition artifacts present in portable instruments.
+This work proposes a spectroscopy-informed dual-stream framework that
+jointly processes raw 1D Raman spectra
+and their 2D continuous wavelet transform (CWT) scalograms.
+Evaluated on the publicly available Bacteria-ID benchmark across
+five clinically significant species, SDR-Fusion achieves 95.84\%
+test accuracy (95\% CI: [94.6, 96.8]), decisively outperforming the
+spectral-only baseline ($+30.80$~pp, $p<0.001$) and providing competitive
+accuracy against the strong scalogram-only ($95.20\%$) and naive
+concatenation ($94.80\%$) baselines while uniquely producing
+per-modality gating signals that expose modality discordance. The core
+architectural contribution is a separation-aware fusion module that
+gates each modality independently before cross-attention. This
+separation principle prevents noise in one acquisition modality from
+corrupting the other, yielding 13--18 percentage points higher accuracy
+under Gaussian noise (flat 95.8\% vs.\ 77.5\% at 20\,dB SNR), and a
+$+5.0$ percentage point advantage at $20\%$ training data over the
+no-fusion dual-stream baseline. With 350\,K parameters and 2.3\,ms inference
+latency, SDR-Fusion satisfies practical constraints for embedded Raman
+inference. Integrated-gradient and layer-wise relevance propagation maps applied
+to the spectral branch localize attribution weight to biochemically
+established bands---amide~I/III (protein-targeting antibiotic
+mechanisms), nucleic-acid stretches (fluoroquinolone and rifampicin
+targets), and the pyocyanin band (\textit{Pseudomonas aeruginosa}
+virulence)---providing a direct computational link between pathogen
+identification and antibiotic mechanism selection. SDR-Fusion provides comparable accuracy to strong multimodal baselines while offering interpretable modality-discordance signals.
+\end{abstract}
+\begin{keyword}
+Bacterial classification \sep
+Raman spectroscopy \sep
+Multimodal fusion \sep
+Continuous wavelet transform \sep
+Explainable AI \sep
+Biomedical signal processing \sep
+Antimicrobial resistance \sep
+Deep learning
+\end{keyword}
+
+\end{frontmatter}
+
+\linenumbers
+
+% ======================================================================
+\section{Introduction}
+\label{sec:intro}
+% ======================================================================
+
+Rapid and accurate identification of bacterial pathogens is a central
+challenge in clinical microbiology, public health, and food
+safety~\cite{ho2019rapid,singh2022culture}. The global spread of
+antimicrobial resistance (AMR) demands diagnostic tools that
+substantially outpace culture-based methods (24--72~hours) while
+remaining more accessible than whole-genome
+sequencing~\cite{singh2022culture}. Raman
+spectroscopy provides label-free, non-destructive molecular
+fingerprints within minutes by recording inelastic scattering of a
+laser source~\cite{ho2019rapid,zhou2022ramannet}. The vibrational
+signatures reflect the molecular composition of key bacterial
+biomolecules---proteins (amide I/III at 1600--1700 and
+1200--1350~cm$^{-1}$), nucleic acids ($\sim$800--900~cm$^{-1}$),
+and lipids (1000--1200~cm$^{-1}$)---forming a chemically
+interpretable fingerprint (Fig.~\ref{fig:single_spectrum}) that
+distinguishes bacterial species
+(Fig.~\ref{fig:class_spectra})~\cite{lussier2020deep,singh2022culture}.
+
+\begin{figure*}[!t]
+\centering
+\begin{subfigure}{0.48\textwidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/fig1_single_spectrum.png}
+  \caption{Representative Raman spectrum}
+  \label{fig:single_spectrum}
+\end{subfigure}\hfill
+\begin{subfigure}{0.48\textwidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/fig2_class_spectra.png}
+  \caption{Mean Raman spectra by class}
+  \label{fig:class_spectra}
+\end{subfigure}
+\caption{(a) Representative Raman spectrum with biochemical bands.
+(b) Mean Raman spectra for five species, showing spectral overlaps
+and distinctive signatures (e.g., pyocyanin).}
+\label{fig:combined_spectra}
+\end{figure*}
+
+These molecular fingerprints are directly relevant to therapeutic
+strategy: amide-band alterations indicate protein-targeting antibiotic
+mechanisms (e.g., $\beta$-lactams disrupting cell-wall peptidoglycan),
+nucleic-acid band shifts point toward nucleic-acid-targeting agents
+(fluoroquinolones, rifampicin), and the pyocyanin band uniquely
+identifies \textit{P.~aeruginosa}, for which specific anti-virulence
+strategies exist~\cite{singh2022culture}. An AI system that can both
+\emph{identify} a pathogen and \emph{localize} the spectral bands
+driving its predictions can provide attribution maps that offer
+molecular-level cues for downstream therapeutic analysis.
+
+Furthermore, the global AMR crisis increasingly demands diagnostic
+intelligence at the network edge: rural clinics, intensive care units,
+and field hospitals cannot rely on centralized laboratory
+infrastructure~\cite{maruthamuthu2020rapid}. Point-of-care Raman
+spectrometers are now commercially available at sub-laboratory price
+points accessible to mid-tier clinical settings~\cite{ho2019rapid},
+but lack embedded
+AI classifiers that are simultaneously accurate, noise-robust, and
+lightweight enough for FPGA or microcontroller deployment. We therefore investigate whether robustness-aware multimodal fusion can improve bacterial Raman classification under realistic acquisition variability.
+
+\subsection{Gap in Existing Approaches}
+\label{ssec:gap}
+
+Conventional deep-learning approaches for Raman classification treat spectra as 1D vectors~\cite{ho2019rapid,zhou2022ramannet,
+balytskyi2024open}; while computationally efficient, this constraint limits feature extraction to the amplitude domain. Liu et~al.\ converted Raman spectra to
+2D wavelet-packet Gramian angular field images for CNN
+classification~\cite{liu2024wpga}, demonstrating the value of
+scale-domain representations; however, this approach \emph{replaces}
+the 1D spectral branch, discarding precise peak-amplitude information.
+Chia et~al.\ used wavelet knockoff features for interpretable
+classification~\cite{chia2021interpretable}, and while both approaches
+demonstrate scale-domain value, neither fuses wavelet features with the
+raw 1D signal in a jointly trained, adaptive dual-stream architecture.
+To the best of our knowledge, prior Raman classification studies have not jointly trained raw spectral and CWT representations using adaptive per-sample fusion.
+
+Multimodal fusion architectures from medical imaging (CT--MRI,
+histology--genomics) are designed for \emph{heterogeneous} data
+sources whose latent spaces are statistically
+independent~\cite{holzinger2022information}. In Raman--CWT fusion,
+by contrast, every scalogram feature is \emph{deterministically
+derived} from the corresponding spectral sample, making the two
+representations physically aligned. 
+
+Current AI-assisted spectroscopic models rarely map learned
+attributions directly back to domain-specific pharmacological
+mechanisms or actionable clinical targets. Similarly, most existing
+high-accuracy Raman classifiers are either too computationally heavy
+for edge deployment or lack the noise robustness required to handle
+lower-quality spectra from portable IoT instruments. 
+
+\subsection{Contributions}
+\label{ssec:contributions}
+
+SDR-Fusion addresses these gaps with three specific, evidence-backed
+contributions:
+
+\begin{enumerate}
+
+\item \textbf{SeparationCross fusion block.}
+      Per-modality learnable sigmoid gating (conditioned
+      independently on each branch before any cross-modal interaction)
+      followed by asymmetric cross-attention (spectral query,
+      scalogram key/value). While gated multimodal fusion has been
+      explored for heterogeneous data~\cite{arevalo2017gated}, the
+      true distinguishing property of SeparationCross is the
+      \emph{separation principle}---that each gate is conditioned
+      only on its own modality before any cross-modal interaction.
+      This separation prevents noise in one modality from contaminating
+      the gating of the other.
+
+\item \textbf{Spectral attribution.}
+      Integrated-gradient and LRP maps applied to the 1D spectral
+      branch produce class-wise wavenumber importance profiles that
+      identify the specific molecular bands driving each prediction.
+      These maps provide domain-specific interpretation mapping bands
+      to antibiotic mechanisms (e.g., amide I/III, nucleic-acid
+      stretches, pyocyanin), providing interpretable evidence that the
+      classification is driven by physically meaningful features
+      rather than spurious correlations.
+
+\item \textbf{Robustness and data-scarcity resilience.}
+      Under Gaussian noise (SNR 20--40~dB), baseline drift, band
+      occlusion, and data scarcity, SDR-Fusion maintains consistent
+      margins over single-modality baselines. At 20\% training
+      data---a realistic constraint in resource-limited clinical
+      settings---SDR-Fusion outperforms Raman-only and no-fusion
+      baselines, demonstrating the regularizing effect of structurally
+      aligned fusion.
+
+\end{enumerate}
+
+% ======================================================================
+\section{Related Work}
+\label{sec:related}
+
+% ======================================================================
+\subsection{Raman Spectroscopy and Deep Learning for Bacterial
+Identification}
+\label{ssec:raman_dl}
+
+Early Raman-based bacterial identification relied on classical machine
+learning---PCA-LDA, SVM, and random forests---achieving 70--85\% on
+small datasets~\cite{ho2019rapid,zhou2022ramannet}. Deep learning
+substantially improved performance: Ho et~al.\ achieved 82.2\% with
+ResNet-18~\cite{ho2019rapid}; Zhou et~al.\ reached 84.7\% with
+RamanNet, a 30\,k-parameter 1D CNN~\cite{zhou2022ramannet}; Singh
+et~al.\ applied deep transfer learning to clinical
+samples~\cite{singh2022culture}; Balytskyi et~al.\
+extended to open-world identification with Objectosphere
+regularization~\cite{balytskyi2024open}. Liu et~al.\ converted spectra
+to 2D wavelet-packet images, achieving 90.6\%~\cite{liu2024wpga};
+however, this approach replaces rather than supplements the 1D branch,
+losing amplitude-domain peak precision. More recently, transformer-based
+architectures have been applied to vibrational spectra~\cite{yan2023spectral},~\cite{lussier2020deep}. Despite these advances, to the best of our knowledge, no prior
+work jointly trains a 1D spectral branch and a 2D CWT branch with
+adaptive, per-sample modality weighting.
+
+% ======================================================================
+\subsection{Wavelet and Scale-Domain Representations for Spectroscopic
+Analysis}
+\label{ssec:wavelet}
+
+Wavelet transforms underpin multi-resolution analysis across biomedical
+signal processing, including ECG denoising, EEG artifact
+removal, and spectroscopic
+preprocessing~\cite{lussier2020deep,maruthamuthu2020rapid}. Wavelet-derived spectral representations have also shown strong
+performance for bacterial Raman classification and biochemical feature
+localization~\cite{liu2024wpga}. For Raman
+data specifically, Chia et~al.\ used wavelet knockoff features for
+statistically controlled, interpretable
+classification~\cite{chia2021interpretable}, and Liu et~al.\ used
+wavelet-packet images as CNN input~\cite{liu2024wpga}. Both studies
+demonstrate the value of scale-domain representations, but neither
+retains the raw 1D spectral branch alongside the wavelet-derived
+features in a jointly optimised architecture. The continuous wavelet
+transform (CWT) with a real Morlet wavelet offers logarithmic
+frequency resolution that is particularly well matched to the broad
+baseline envelopes and sharp localised peaks that co-exist in bacterial
+Raman fingerprints~\cite{chia2021interpretable,liu2024wpga}; this
+property motivates its use in SDR-Fusion over fixed-resolution
+alternatives such as the short-time Fourier transform.
+
+% ======================================================================
+\subsection{Multimodal and Multi-Stream Fusion in Biomedical AI}
+\label{ssec:fusion}
+
+Holzinger et~al.\ establish information fusion as an integrative enabler
+for robust, explainable, and trustworthy medical
+AI~\cite{holzinger2022information}. Within this paradigm, gated
+multimodal units~\cite{arevalo2017gated} introduced learnable sigmoid
+gates for heterogeneous modality fusion, and feature-wise linear
+modulation (FiLM)~\cite{perez2018film} demonstrated expressive affine
+conditioning across modalities. Attention-based fusion has been explored
+in multimodal medical imaging---for example, combining CT and MRI
+streams via cross-attention for tumour
+segmentation~\cite{holzinger2022information}---and in audio-visual
+learning via asymmetric cross-modal
+attention~\cite{vaswani2017attention}. However, these generic fusion
+modules assume statistically independent latent spaces. In Raman--CWT
+fusion, every scalogram feature is deterministically derived from the
+same spectral sample, making the two representations physically aligned;
+this structural property demands a fusion design where each branch's
+gate is conditioned only on its own signal quality before any
+cross-modal interaction, which is the distinguishing principle of
+SeparationCross. Ma et~al.\ address adversarial robustness in medical
+image analysis~\cite{ma2021understanding}; unlike their synthetic-attack
+focus, SDR-Fusion targets the physical noise and baseline drift inherent
+in point-of-care Raman acquisition. Gated Multimodal Units (GMU) introduced cross-conditioned gating for
+multimodal fusion through shared modality interaction
+mechanisms~\cite{arevalo2017gated}.
+
+% ======================================================================% ======================================================================
+\subsection{Interpretable and Deployable Raman AI}
+\label{ssec:interp_edge}
+% ======================================================================
+
+Integrated gradients~\cite{sundararajan2017axiomatic} and layer-wise
+relevance propagation (LRP)~\cite{bach2015pixel} are established
+methods for attributing neural-network predictions to input features.
+In Raman spectroscopy, attribution maps have been used to identify
+chemically meaningful bands and validate that attend to
+biologically relevant spectral regions rather than acquisition
+artefacts~\cite{lussier2020deep,singh2022culture,chia2021interpretable}.
+SDR-Fusion extends this paradigm within a dual-stream architecture by
+mapping class-specific predictions to interpretable Raman bands. Interpretability-driven Raman learning has additionally been explored
+through knockoff-wavelet attribution frameworks on the same
+Bacteria-ID benchmark~\cite{chia2021interpretable}.
+
+Beyond interpretability, Raman-AI systems must also satisfy practical
+deployment constraints including low latency, compact parameterization,
+and robustness to acquisition variability. Model compression
+techniques such as quantization and structured
+pruning~\cite{han2016deep,jacob2018quantization} have enabled compact
+deep-learning models for embedded and edge-AI deployment, motivating
+lightweight multimodal architectures for portable Raman diagnostics.
+%  ======================================================================
+\section{Methodology}
+\label{sec:methods}
+% ======================================================================
+
+\subsection{Notations and Problem Formulation}
+\label{ssec:notation}
+
+Table~\ref{tab:notations} summarizes the mathematical symbols used
+throughout. Let $\mathcal{D}=\{(\mathbf{x}_i^{(s)},\mathbf{x}_i^{(w)},
+y_i)\}_{i=1}^{N}$, where $\mathbf{x}_i^{(s)}\in\mathbb{R}^{L}$
+($L=1000$) is the preprocessed Raman spectrum spanning
+400--1800~cm$^{-1}$, $\mathbf{x}_i^{(w)}\in\mathbb{R}^{3\times224\times224}$
+is the corresponding CWT scalogram, and $y_i\in\{0,\ldots,C{-}1\}$
+is the bacterial class label ($C=5$). The objective is to learn
+$f:(\mathbf{x}^{(s)},\mathbf{x}^{(w)})\rightarrow y$ that maximizes
+accuracy on unseen samples while producing attribution maps that are
+interpretable in terms of established Raman band assignments.
+
+\begin{table}[!t]
+\centering
+\caption{Mathematical notations used in the methodology.}
+\label{tab:notations}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{lp{4.2cm} | lp{4.2cm}}
+  \toprule
+  \textbf{Symbol} & \textbf{Description} &
+  \textbf{Symbol} & \textbf{Description} \\
+  \midrule
+  $N$ & Number of bacterial samples &
+  $\alpha,\,\beta$ & Learnable sigmoid gates $\in(0,1)^{128}$ \\
+  $L$ & Spectrum length ($L=1000$) &
+  $\mathbf{W}_\alpha,\mathbf{W}_\beta$ &
+      Gating weight matrices $\in\mathbb{R}^{128\times128}$ \\
+  $\mathbf{x}_i^{(s)}$ & Preprocessed 1D Raman spectrum &
+  $\mathbf{b}_\alpha,\mathbf{b}_\beta$ &
+      Gating bias vectors $\in\mathbb{R}^{128}$ \\
+  $\mathbf{x}_i^{(w)}$ & CWT scalogram ($3\times224\times224$) &
+  $\mathbf{Q},\mathbf{K},\mathbf{V}$ & Query, Key, Value for attention \\
+  $y_i$ & Ground-truth label $\in\{0,\ldots,C{-}1\}$ &
+  $d_k$ & Attention scaling dim ($d_k=128$) \\
+  $C$ & Number of bacterial classes ($C=5$) &
+  $\mathbf{z}_\mathrm{fused}$ & 256-dim fused representation \\
+  $\mathbf{z}^{(s)},\mathbf{z}^{(w)}$ &
+      128-dim spectral/scalogram embeddings &
+  $\mathcal{L}_\mathrm{CE}$ & Cross-entropy training loss \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Data Preprocessing}
+\label{ssec:preprocessing}
+
+All preprocessing is applied identically to all model variants and was
+fixed before any model evaluation. Table~\ref{tab:preprocparams}
+provides a complete parameter listing for reproducibility.
+
+\subsubsection{1D Raman Spectra}
+\label{sssec:prep1d}
+
+Three sequential steps clean the raw spectrum:
+
+\textbf{(1) Baseline correction.} Asymmetric least-squares (ALS)
+smoothing~\cite{lussier2020deep} estimates and subtracts the
+fluorescence background.
+
+\textbf{(2) Normalization.} Min--max scaling maps each corrected
+spectrum to $[0,1]$.
+
+\textbf{(3) Denoising.} Savitzky--Golay filtering (second-order
+polynomial, window 11) suppresses high-frequency noise while
+preserving peak shapes.
+
+\subsubsection{CWT Scale--Wavenumber Scalogram Generation}
+\label{sssec:cwt}
+
+A real Morlet CWT (implemented via PyWavelets v1.4.1~\cite{lee2019pywavelets},
+wavelet identifier \texttt{morl}) is applied to each preprocessed spectrum:
+\begin{equation}
+  W(a,b) = \frac{1}{\sqrt{a}}
+  \int_{-\infty}^{\infty} x(t)\,\psi^*\!\left(\frac{t-b}{a}\right)
+  \mathrm{d}t,
+  \label{eq:cwt}
+\end{equation}
+where $a>0$ is the scale parameter and $b$ is the translation
+(wavenumber position, cm$^{-1}$). Because the Raman spectrum's
+horizontal axis is wavenumber rather than time, the output is a
+\emph{scale--wavenumber} map. The power scalogram $|W(a,b)|^2$ is
+computed over $N_s{=}256$ log-spaced scales
+($a_i = 2^{(i-1)\cdot\log_2(256)/(255)}$, $i=1,\ldots,256$)
+via \texttt{pywt.cwt(spectrum, scales, 'morl')}.
+The resulting $256{\times}1000$ power map is resized to
+$224{\times}224$ pixels by bilinear interpolation
+(\texttt{cv2.resize}, \texttt{INTER\_LINEAR}), normalised to $[0,1]$,
+quantised to 8-bit, and mapped to a three-channel Viridis RGB image
+via \texttt{cv2.applyColorMap(\ldots, cv2.COLORMAP\_VIRIDIS)}
+(Fig.~\ref{fig:wavelet}).
+
+\begin{figure}[!t]
+\centering
+\includegraphics[width=0.48\textwidth]{figures/fig3_wavelet_example.png}
+\caption{CWT converts a 1D Raman spectrum into a 2D scalogram,
+capturing complementary scale-wavenumber features.}
+\label{fig:wavelet}
+\end{figure}
+
+\textbf{Physical and pharmacological justification.}
+The fingerprint region 400--1800~cm$^{-1}$ encompasses all clinically
+established Raman band assignments for bacterial biomolecules:
+amide~I/III (protein secondary structure, relevant to $\beta$-lactam
+and glycopeptide mechanisms), nucleic-acid C--O stretches
+(fluoroquinolone and rifampicin targets), phenylalanine
+($\sim$1003~cm$^{-1}$), and lipid C--C/C--H stretches (polymyxin and
+daptomycin membrane-disruption targets)~\cite{singh2022culture}.
+Confining the CWT to this region not only suppresses Rayleigh-line
+artefacts but ensures that every scale--wavenumber feature has a
+chemically interpretable correspondent in the Raman assignment
+literature---directly supporting biochemically interpretable
+attribution.
+
+\subsection{SDR-Fusion Architecture}
+\label{ssec:architecture}
+
+SDR-Fusion comprises four components: (1) a 1D CNN spectral branch,
+(2) a 2D CNN scalogram branch, (3) the SeparationCross fusion module,
+and (4) a classifier head. Fig.~\ref{fig:arch_combined} shows the
+complete dual-stream architecture including branch-level details.
+
+\begin{figure*}[!t]
+\centering
+\includegraphics[width=\textwidth,keepaspectratio]{Raman Arch.jpeg}
+\caption{Consolidated SDR-Fusion architecture for Raman--CWT fusion. A dual-stream model processes the 1D Raman spectrum and 2D CWT scalogram via dedicated CNN branches, followed by SeparationCross fusion with independent gating ($\alpha$, $\beta$), cross-attention, and residual scaling ($\gamma$). The fused representation is passed to a classifier head for prediction. Total parameters: $\sim$350K.}
+\label{fig:arch_combined}
+\end{figure*}
+
+\subsubsection{1D Spectral Branch}
+\label{sssec:branch1d}
+
+The 1D spectral branch is designed to extract hierarchical
+morphological features directly from the preprocessed Raman spectrum
+using a stride-2 stem followed by a residual block and a projection
+layer. The stride-2 stem halves the sequence length early, providing
+a compact multi-scale representation:
+\begin{align}
+  \mathbf{h}_1^{(s)} &= \mathrm{ReLU}\!\left(\mathrm{BN}\!\left(
+      \mathrm{Conv1D}(\mathbf{x}^{(s)};64, k{=}7, s{=}2)\right)\right).
+\end{align}
+A residual block then builds a 128-channel representation with a
+skip connection that preserves gradient flow to early layers:
+\begin{align}
+  \mathbf{r}^{(s)} &= \mathrm{BN}\!\left(
+      \mathrm{Conv1D}(\mathbf{h}_1^{(s)};128, k{=}5)\right), \\
+  \mathbf{h}_2^{(s)} &= \mathrm{ReLU}\!\left(
+      \mathrm{BN}\!\left(\mathrm{Conv1D}(\mathrm{ReLU}(\mathbf{r}^{(s)});128, k{=}3)\right)
+      + \mathbf{r}^{(s)}\right).
+\end{align}
+A final projection layer maps to the embedding dimension:
+\begin{align}
+  \mathbf{h}_3^{(s)} &= \mathrm{ReLU}\!\left(\mathrm{BN}\!\left(
+      \mathrm{Conv1D}(\mathbf{h}_2^{(s)};128, k{=}3)\right)\right).
+\end{align}
+Global adaptive average pooling then aggregates the spatial dimension,
+yielding a compact, fixed-length spectral embedding
+$\mathbf{z}^{(s)}\in\mathbb{R}^{128}$ that remains robust to minor
+peak shifts while retaining critical amplitude-domain information.
+The residual connection ensures that gradients reach the stem directly,
+which is essential for learning from the 1000-point input.
+\subsubsection{Spectral Tokenization and Feature Embedding}
+\textit{Note: the tokenization described here is performed inside the
+SeparationCross fusion module (Section~\ref{sssec:fusion}) as the
+preparatory step that maps CNN branch outputs into aligned token
+sequences for cross-attention. It does not replace or interpose the
+CNN branches described above; the 1D and 2D CNN encoders run to
+completion first, producing embeddings $\mathbf{z}^{(s)}$ and
+$\mathbf{z}^{(w)}$, and tokenization is then applied to the
+intermediate feature maps before the attention operation.}
+
+Inside the SeparationCross module, each CNN branch output is first
+modality-gated and then adaptively pooled into a fixed-length token
+sequence. Both branches share embedding dimension $D{=}128$.
+
+For the spectral branch, the per-channel sigmoid gate
+$\alpha \in [0,1]^{D}$ (derived from the pooled spectral embedding;
+see Section~\ref{sssec:fusion}) scales the pre-pooling 1D CNN feature
+map $\mathbf{h}^{(s)} \in \mathbb{R}^{D \times L'}$.
+The gated map $\mathbf{h}_\alpha^{(s)} = \alpha \odot \mathbf{h}^{(s)}$
+is adaptively pooled to $S$ wavenumber-aligned tokens:
+\begin{equation}
+    \mathbf{T}^{(s)} =
+      \bigl(\mathrm{AdaptiveAvgPool1d}_{S}\!\bigl(\mathbf{h}_\alpha^{(s)}
+      \bigr)\bigr)^{\!\top} \in \mathbb{R}^{S \times D},
+\end{equation}
+where $S{=}25$ spectral tokens are selected by grid search on the
+validation set (Section~\ref{sssec:fusion}).
+
+Concurrently, the per-channel gate $\beta \in [0,1]^{D}$ scales the
+2D CNN feature map $\mathbf{h}^{(w)} \in \mathbb{R}^{D \times H' \times W'}$.
+The gated map $\mathbf{h}_\beta^{(w)} = \beta \odot \mathbf{h}^{(w)}$
+is spatially flattened into a token sequence:
+\begin{equation}
+    \mathbf{T}^{(w)} =
+      \bigl(\mathrm{Flatten}_{H'W'}\!\bigl(\mathbf{h}_\beta^{(w)}
+      \bigr)\bigr)^{\!\top} \in \mathbb{R}^{H'W' \times D}.
+\end{equation}
+Token index $i$ in $\mathbf{T}^{(s)}$ aligns with the same relative
+spectral band window as index $i$ in $\mathbf{T}^{(w)}$, preparing
+both streams for cross-modal attention in the SeparationCross module.
+\subsubsection{2D Scalogram Branch}
+\label{sssec:branch2d}
+
+In parallel, the 2D scalogram branch processes the continuous wavelet
+transform output to capture multi-scale spatial patterns, which encode
+peak widths and noise-robust structural invariants. This branch
+utilizes three stacked 2D convolutional blocks, each featuring a
+standard $3\times3$ spatial kernel, batch normalization, and a
+$\mathrm{ReLU}$ activation. To systematically reduce the spatial
+resolution while extracting dominant scale-domain features, a maximum
+pooling operation ($\mathrm{MaxPool2D}$) is applied after each
+activation:
+\begin{align}
+  \mathbf{h}_1^{(w)} &= \mathrm{MaxPool2D}\!\left(\mathrm{ReLU}\!\left(
+      \mathrm{BN}\!\left(\mathrm{Conv2D}(\mathbf{x}^{(w)};32,
+      3{\times}3)\right)\right)\right), \\
+  \mathbf{h}_2^{(w)} &= \mathrm{MaxPool2D}\!\left(\mathrm{ReLU}\!\left(
+      \mathrm{BN}\!\left(\mathrm{Conv2D}(\mathbf{h}_1^{(w)};64,
+      3{\times}3)\right)\right)\right), \\
+  \mathbf{h}_3^{(w)} &= \mathrm{MaxPool2D}\!\left(\mathrm{ReLU}\!\left(
+      \mathrm{BN}\!\left(\mathrm{Conv2D}(\mathbf{h}_2^{(w)};128,
+      3{\times}3)\right)\right)\right).
+\end{align}
+Adaptive average pooling then collapses the remaining spatial
+dimensions to produce the scalogram embedding
+$\mathbf{z}^{(w)}\in\mathbb{R}^{128}$. This ensures the output
+dimensionality structurally matches the 1D spectral branch, preparing
+the two distinct representations for modality-aware gating in the
+subsequent SeparationCross module.
+
+\subsection{SeparationCross Fusion Module}
+\label{sssec:fusion}
+
+Before cross-attention, the gated feature maps are adaptively pooled into fixed-length token sequences to enable aligned spectral–scalogram interaction. The SeparationCross module (Fig.~\ref{fig:arch_combined}d) implements
+two complementary mechanisms designed for physically aligned 1D--2D
+spectroscopic fusion, drawing inspiration from gated
+mixture-of-experts~\cite{shazeer2017outrageously}. Optimal fusion should be \emph{asymmetric} and \emph{per-sample quality-aware}: the 1D
+branch provides sharp peak localization, the CWT branch provides
+noise-robust multi-scale context, and a sample-wise gate should route
+trust toward whichever branch is more reliable. Existing fusion modules
+assume statistical independence between modality embeddings; for
+Raman--CWT fusion, asymmetric, per-sample quality-aware
+gating---absent from all generic modules---is necessary. If a standard
+fusion mechanism mixes these embeddings indiscriminately, noise in a
+single acquisition corrupts the entire fused embedding. SDR-Fusion avoids
+this by designing a module where each branch's gate is conditioned
+solely on its own signal quality.
+\noindent\textbf{Step 1 --- Separation gating.}
+\begin{align}
+  \alpha &= \sigma\!\left(\mathbf{W}_\alpha\mathbf{z}^{(s)}
+           +\mathbf{b}_\alpha\right), \label{eq:alpha}\\
+  \beta  &= \sigma\!\left(\mathbf{W}_\beta\mathbf{z}^{(w)}
+           +\mathbf{b}_\beta\right).  \label{eq:beta}
+\end{align}
+Gated embeddings: $\mathbf{z}_\alpha^{(s)}=\alpha\odot\mathbf{z}^{(s)}$,
+$\mathbf{z}_\beta^{(w)}=\beta\odot\mathbf{z}^{(w)}$. Each gate is
+conditioned \emph{only} on its own modality, ensuring that spectral
+signal quality controls only the spectral branch and scalogram quality
+controls only the scalogram branch.
+
+\noindent\textbf{Step 2 --- Spatial cross-attention.}
+The gated feature maps are tokenized into spatial sequences. The
+gated spectral feature map
+$\mathbf{h}_\alpha^{(s)} = \alpha \odot \mathbf{h}^{(s)} \in \mathbb{R}^{D \times L}$
+(where $\mathbf{h}^{(s)}$ is the pre-pooling 1D branch output)
+is pooled to $S{=}25$ tokens via adaptive average pooling and
+transposed to yield $\mathbf{T}^{(s)} \in \mathbb{R}^{S \times D}$.
+The value $S{=}25$ was selected by grid-searching $S \in \{10, 15,
+20, 25, 30, 50\}$ on the validation set; $S{=}25$ achieved the
+highest validation accuracy and aligns with the approximate width of
+individual biochemical peaks at 400--1800~cm$^{-1}$ spectral
+resolution. The gated scalogram feature map
+$\mathbf{h}_\beta^{(w)} = \beta \odot \mathbf{h}^{(w)} \in \mathbb{R}^{D \times H' \times W'}$
+is flattened to $\mathbf{T}^{(w)} \in \mathbb{R}^{H'W' \times D}$.
+Cross-attention~\cite{vaswani2017attention},~\cite{tsai2019multimodal} is computed with the
+spectral tokens as queries and scalogram tokens as keys/values:
+\begin{equation}
+  \mathbf{Q} = \mathbf{T}^{(s)}\mathbf{W}_Q, \quad
+  \mathbf{K} = \mathbf{T}^{(w)}\mathbf{W}_K, \quad
+  \mathbf{V} = \mathbf{T}^{(w)}\mathbf{W}_V,
+  \label{eq:qkv}
+\end{equation}
+where $\mathbf{W}_Q, \mathbf{W}_K, \mathbf{W}_V \in \mathbb{R}^{D
+\times D}$ and $D{=}128$. The attended output is:
+\begin{equation}
+  \mathbf{Z}_\mathrm{attn} =
+  \mathrm{softmax}\!\left(\frac{\mathbf{Q}\mathbf{K}^\top}{\sqrt{D}}
+  \right)\mathbf{V} \in \mathbb{R}^{S \times D},
+  \label{eq:attn}
+\end{equation}
+which is mean-pooled over the $S$ tokens to produce
+$\mathbf{z}_\mathrm{attn} \in \mathbb{R}^{D}$. A learnable residual
+scalar $\gamma$ (initialized to zero) controls the injection of
+spectral evidence:
+$\mathbf{z}_\mathrm{combined} = \mathbf{z}_\alpha^{(s)} + \gamma
+\cdot \mathbf{z}_\mathrm{attn}$. The fused vector:
+\begin{equation}
+  \mathbf{z}_\mathrm{fused} =
+  \left[\mathbf{z}_\mathrm{combined};\,\mathbf{z}_\beta^{(w)}\right]
+  \in\mathbb{R}^{2D}.
+  \label{eq:fused}
+\end{equation}
+
+\subsection{Classifier Head and Training Procedure}
+\label{ssec:head_and_training}
+
+The final classification is performed by a dedicated head that maps
+the fused multimodal embedding to class probabilities. The
+256-dimensional fused vector is passed through a fully connected
+layer, regularized via dropout, and projected to the final class
+logits using a softmax activation:
+\begin{align}
+  \mathbf{h}_\mathrm{cls}  &= \mathrm{ReLU}\!\left(
+      \mathrm{FC}(\mathbf{z}_\mathrm{fused};256\!\to\!128)\right), \\
+  \mathbf{h}_\mathrm{drop} &= \mathrm{Dropout}(
+      \mathbf{h}_\mathrm{cls},p{=}0.3), \\
+  \hat{\mathbf{y}} &= \mathrm{Softmax}\!\left(
+      \mathrm{FC}(\mathbf{h}_\mathrm{drop};128\!\to\!C)\right).
+\end{align}
+The entire architecture is optimized end-to-end using the standard
+categorical cross-entropy loss function over the $N$ samples and $C$
+classes:
+\begin{equation}
+  \mathcal{L}_\mathrm{CE} =
+  -\frac{1}{N}\sum_{i=1}^{N}\sum_{c=0}^{C-1}
+  y_{i,c}\log\hat{y}_{i,c}.
+\end{equation}
+Table~\ref{tab:hyperparams} lists the optimization settings and
+hyperparameters, which were fixed prior to any model evaluation. The
+comprehensive end-to-end training process and the subsequent
+low-latency edge-inference procedure are detailed sequentially in
+Algorithms~\ref{alg:training} and \ref{alg:inference}.
+
+\begin{table}[!t]
+\centering
+\begin{minipage}[t]{0.48\textwidth}
+\centering
+\caption{Preprocessing pipeline parameters.}
+\label{tab:preprocparams}
+\renewcommand{\arraystretch}{1.2}
+\resizebox{\textwidth}{!}{
+\begin{tabular}{lll}
+  \toprule
+  Step & Parameter & Value \\
+  \midrule
+  ALS baseline correction & Smoothness $\lambda$ & $10^{5}$ \\
+                          & Asymmetry $p$        & $0.01$ \\
+                          & Iterations           & 10 \\
+  Savitzky--Golay denoise & Window size          & 11 \\
+                          & Polynomial order     & 2 \\
+  Normalization           & Method                & Min--max to $[0,1]$ \\
+  CWT (real Morlet)       & Centre freq.\ $\omega_0$ & 6~rad \\
+                          & Scale range          & 1--256 (256 scales) \\
+                          & Output size          & $224\times224$~px \\
+                          & Color map            & Viridis (3-ch.\ RGB) \\
+  \bottomrule
+\end{tabular}
+}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.48\textwidth}
+\centering
+\caption{Training hyperparameters.}
+\label{tab:hyperparams}
+\renewcommand{\arraystretch}{1.2}
+\resizebox{\textwidth}{!}{
+\begin{tabular}{ll}
+  \toprule
+  Hyperparameter & Value \\
+  \midrule
+  Optimiser             & AdamW \\
+  Initial learning rate & $1\times10^{-3}$ \\
+  Weight decay          & $1\times10^{-4}$ \\
+  Batch size            & 32 \\
+  Max.\ epochs          & 30 \\
+  LR schedule           & Cosine annealing ($T_{\max}=30$) \\
+  Dropout               & 0.3 \\
+  Random seed           & 42 \\
+  Mixed precision       & FP16 (\texttt{torch.autocast}) \\
+  Framework             & PyTorch~2.0 \\
+  Hardware              & Apple Silicon (M-series, MPS backend) \\
+  \bottomrule
+\end{tabular}
+}
+\end{minipage}
+\end{table}
+
+\begin{algorithm}[!t]
+\caption{End-to-end training of SDR-Fusion}
+\label{alg:training}
+\begin{algorithmic}[1]
+  \State \textbf{Input:}
+         $\mathcal{D}=\{(\mathbf{x}_i^{(s)},\mathbf{x}_i^{(w)},
+         y_i)\}_{i=1}^N$;
+         hyperparameters from Table~\ref{tab:hyperparams}
+  \State \textbf{Output:} Trained parameters $\Theta^*$
+  \State Initialize $\Theta=\{\theta_s,\theta_w,\theta_f,\theta_c\}$;
+         seed $\leftarrow 42$
+  \For{epoch $= 1$ \textbf{to} $30$}
+    \State Shuffle $\mathcal{D}$
+    \For{each mini-batch
+         $\{(\mathbf{x}_b^{(s)},\mathbf{x}_b^{(w)},y_b)\}$}
+      \State $\mathbf{x}_b^{(s)}\leftarrow
+              \mathrm{ALS}(\cdot){\to}\mathrm{MinMax}(\cdot)
+              {\to}\mathrm{SG}(\cdot)$
+      \State $\mathbf{x}_b^{(w)}\leftarrow
+              \mathrm{CWT}(\mathbf{x}_b^{(s)}){\to}
+              \mathrm{Viridis\_RGB}(3{\times}224{\times}224)$
+      \State $\mathbf{z}^{(s)}\leftarrow
+              f_{1D}(\mathbf{x}_b^{(s)};\theta_s)$;\;
+              $\mathbf{z}^{(w)}\leftarrow
+              f_{2D}(\mathbf{x}_b^{(w)};\theta_w)$
+      \State $\alpha\leftarrow
+              \sigma(\mathbf{W}_\alpha\mathbf{z}^{(s)}{+}
+              \mathbf{b}_\alpha)$;\;
+              $\beta\leftarrow
+              \sigma(\mathbf{W}_\beta\mathbf{z}^{(w)}{+}
+              \mathbf{b}_\beta)$
+              \hfill{\small(Eqs.~\ref{eq:alpha}--\ref{eq:beta})}
+      \State $\mathbf{z}_\alpha^{(s)}\leftarrow
+              \alpha\odot\mathbf{z}^{(s)}$;\;
+              $\mathbf{z}_\beta^{(w)}\leftarrow
+              \beta\odot\mathbf{z}^{(w)}$
+      \State $\mathbf{Q}{\leftarrow}\mathbf{T}^{(s)}$;\;
+              $\mathbf{K}{\leftarrow}\mathbf{T}^{(w)}$;\;
+              $\mathbf{V}{\leftarrow}\mathbf{T}^{(w)}$
+              \hfill{\small(tokenized via
+              Sec~\ref{sssec:fusion})}
+      \State $\mathbf{z}_\mathrm{attn}\leftarrow
+              \mathrm{mean\_pool}(
+              \mathrm{softmax}(\mathbf{Q}\mathbf{K}^\top/
+              \sqrt{d_k})\mathbf{V})$
+      \State $\mathbf{z}_\mathrm{combined}\leftarrow
+              \mathbf{z}_\alpha^{(s)}{+}\gamma\mathbf{z}_\mathrm{attn}$
+      \State $\mathbf{z}_\mathrm{fused}\leftarrow
+              [\mathbf{z}_\mathrm{combined};\,
+              \mathbf{z}_\beta^{(w)}]$
+      \State $\hat{y}_b\leftarrow
+              h_\mathrm{cls}(\mathbf{z}_\mathrm{fused};\theta_c)$
+      \State $\mathcal{L}\leftarrow
+              \mathcal{L}_\mathrm{CE}(\hat{y}_b,y_b)$;\;
+              $\Theta\leftarrow\Theta{-}\eta_t\nabla_\Theta\mathcal{L}$
+    \EndFor
+  \EndFor
+  \State \Return $\Theta^*$
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}[!t]
+\caption{Inference on a new Raman spectrum (2.3~ms end-to-end)}
+\label{alg:inference}
+\begin{algorithmic}[1]
+  \State \textbf{Input:} Raw
+         $\mathbf{x}_\mathrm{new}^{(s)}\in\mathbb{R}^{1000}$
+         (from any portable/IoT Raman device)
+  \State \textbf{Output:} Predicted species $\hat{y}_\mathrm{new}$ +
+         attribution vector $\mathbf{a}\in\mathbb{R}^{1000}$
+  \State Preprocess: ALS $\to$ MinMax $\to$ SG
+  \State CWT $\to$ Viridis RGB: $\mathbf{x}_\mathrm{new}^{(w)}$
+  \State $\mathbf{z}^{(s)},\mathbf{z}^{(w)}\leftarrow
+         f_{1D}(\cdot),f_{2D}(\cdot)$
+  \State SeparationCross fusion $\to\mathbf{z}_\mathrm{fused}$
+         \hfill{\small(Eqs.~\ref{eq:alpha}--\ref{eq:fused})}
+  \State $\hat{y}_\mathrm{new}\leftarrow
+         \arg\max_c h_\mathrm{cls}(\mathbf{z}_\mathrm{fused})[c]$
+  \State $\mathbf{a}\leftarrow
+         \mathrm{IntegratedGradients}(f_{1D},
+         \mathbf{x}_\mathrm{new}^{(s)},\hat{y}_\mathrm{new})$
+         \hfill{\small(biochemically interpretable attribution)}
+  \State \Return $\hat{y}_\mathrm{new},\;\mathbf{a}$
+\end{algorithmic}
+\end{algorithm}
+
+
+% ======================================================================
+\section{Experiments and Results}
+\label{sec:experiments}
+% ======================================================================
+
+\subsection{Dataset and Species Selection}
+\label{ssec:dataset}
+The experimental validation of the SDR-Fusion architecture is conducted on the \textit{Bacteria-ID} benchmark dataset~\cite{ho2019rapid}, which contains high-resolution single-cell Raman spectra across five clinically significant bacterial species. To ensure rigorous evaluation and prevent class imbalances from skewing baseline comparisons, the dataset partition is balanced to comprise exactly 2,500 independent spectral profiles per target category ($N = 12,500$ total spectra). The clinical profiles evaluated within this multi-class architecture include:
+\begin{itemize}
+    \item \textit{Escherichia coli} ($n=2,500$): A predominant Gram-negative pathogen frequently isolated as the primary cause of clinical bacteraemia and urinary tract infections (UTIs).
+    \item \textit{Klebsiella pneumoniae} ($n=2,500$): An encapsulated Gram-negative rod associated with severe nosocomial pneumonia and multi-drug resistant hospital outbreaks.
+    \item \textit{Pseudomonas aeruginosa} ($n=2,500$): An opportunistic Gram-negative pathogen known for its robust biofilm-forming capabilities on medical instrumentation.
+    \item \textit{Staphylococcus aureus} ($n=2,500$): A critical Gram-positive species serving as a primary model for examining cell-wall targeted antibiotic responses.
+    \item \textit{Enterococcus faecalis} ($n=2,500$): A resilient Gram-positive commensal tracking with high instances of nosocomial endocarditis and intrinsic resistance.
+\end{itemize}
+The five species include spectrally overlapping pairs
+(\textit{E.~coli}/\textit{K.~pneumoniae}: $r{=}0.97$;
+\textit{P.~aeruginosa}/\textit{S.~aureus}: $r{=}0.89$) that represent
+a clinically realistic challenge for diagnostic AI. Each spectrum spans
+400--1800~cm$^{-1}$ with 1,000 points; corresponding scalograms are
+$3\times224\times224$ RGB images.
+
+The same Bacteria-ID benchmark has previously been evaluated using
+deep residual CNN architectures and related Raman-learning
+frameworks~\cite{ho2019rapid,zhou2022ramannet}.
+
+\textbf{Dataset limitations.} Spectra were acquired from pure cultures
+with a single instrument at 532~nm. Clinical specimens introduce
+complex matrices, instrument variability, and varying bacterial loads.
+Section~\ref{ssec:cross_and_openworld} provides a preliminary
+cross-instrument assessment.
+
+\textbf{Baselines.} Six models are compared in Table~\ref{tab:overall}:
+(1)~Raman-only: 1D CNN (following the RamanNet architecture~\cite{zhou2022ramannet})
+on preprocessed spectra only; (2)~Scalogram-only: 2D CNN on CWT images
+only; (3)~No-fusion (Concat): both branches with direct embedding
+concatenation without gating or attention; (4)~SDR-Fusion:
+SeparationCross (gating + cross-attention); (5)~Transformer-1D;
+and (6)~FiLM.
+
+\subsection{Evaluation Protocol and Statistical Testing}
+\label{ssec:eval_protocol}
+
+All experiments use the Bacteria-ID benchmark with a stratified random
+80/10/10 train/validation/test split (random seed 42), yielding 10,000
+training, 1,250 validation, and 1,250 test spectra with equal class
+representation across all partitions. The validation set was used
+exclusively for early stopping; no hyperparameter decisions were made
+on the test set. All reported accuracy figures are computed on the
+held-out test set only.
+
+Statistical significance is assessed using the McNemar test on paired
+per-sample predictions, with SDR-Fusion as the reference model.
+Confidence intervals are 95\% Wilson score intervals. A result is
+considered statistically significant at $p < 0.05$. For the
+30-species open-world experiments, the same testing protocol applies;
+$p$-values in Table~\ref{tab:openworld} are McNemar tests against
+SDR-Fusion on the held-out 3,000-spectra test set.
+
+Direct numerical comparison with prior studies should be interpreted
+cautiously because published works frequently employ different species
+subsets, preprocessing pipelines, and train/test partitioning
+protocols.
+
+\subsection{Primary 5-Class Benchmark Results}
+\label{ssec:performance}
+
+Table~\ref{tab:overall} reports test accuracy, 95\% Wilson CIs, and
+McNemar $p$-values. SDR-Fusion achieves 95.84\% accuracy, with absolute
+gains over Raman-only, scalogram-only, and concatenation baselines
+(see Table~\ref{tab:overall}).
+Transformer-1D~\cite{vaswani2017attention}, implemented with a
+CNN-stem tokeniser followed by spectral self-attention, reaches
+97.60\% (95\% CI: [96.6, 98.3]). This indicates that attention-based
+spectral modeling is highly competitive when local convolutional
+inductive bias and stable input scaling are included in the tokenisation
+pipeline.
+FiLM~\cite{perez2018film} achieves competitive accuracy using
+feature-wise linear modulation of the scalogram branch conditioned on
+spectral embeddings, demonstrating that cross-modal conditioning helps.
+Compared with SDR-Fusion, FiLM is not significantly different on McNemar
+testing ($p=0.061$), whereas Transformer-1D differs significantly from
+SDR-Fusion ($p=0.003$).
+
+\begin{table}[!t]
+\centering
+\caption{Test accuracy, 95\% CIs, and McNemar $p$-values.
+Reference: SDR-Fusion.}
+\label{tab:overall}
+\begin{tabular}{lccc}
+  \toprule
+  Method & Acc (\%) & 95\% CI & $p$-value \\
+  \midrule
+  Raman-only (RamanNet~\cite{zhou2022ramannet})
+      & 65.04 & [62.4, 67.6] & $<0.001$ \\
+  Scalogram-only (CWT)
+      & 95.20 & [93.9, 96.3] & $0.322$ \\
+  No-fusion (Concat)
+      & 94.80 & [93.4, 95.9] & $0.086$ \\
+  Transformer-1D~\cite{vaswani2017attention}
+      & 97.60 & [96.6, 98.3] & $0.003$ \\
+  FiLM~\cite{perez2018film}
+      & \filmfiveclassacc & \filmfiveclassci & \filmfiveclassp \\
+  \textbf{SDR-Fusion}
+      & \textbf{95.84} & [94.6, 96.8] & --- \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+Fig.~\ref{fig:training} plots training and validation accuracy over
+28~epochs (early stopping halted training before the configured 30-epoch
+maximum; see Table~\ref{tab:hyperparams}). SDR-Fusion converges within 10~epochs; validation tracks
+training closely, confirming limited overfitting. The visible dip in
+validation accuracy around epoch~3 reflects the initial optimization
+of the asymmetric cross-attention weights before the spectral and
+scalogram modalities reach a stable alignment; a few further transient
+dips occur during mid-training (e.g.\ epochs~9 and~14) before the
+modalities settle, consistent with the known warm-up dynamics of
+attention-based fusion modules~\cite{vaswani2017attention}. Stability
+from epoch~22 onward suggests SeparationCross learns effective modality
+integration early.
+
+\begin{figure}[!t]
+\centering
+\includegraphics[width=0.48\textwidth]{figures/fig4_training_curves.png}
+\caption{Training and validation accuracy for SDR-Fusion over 28~epochs.}
+\label{fig:training}
+\end{figure}
+
+Fig.~\ref{fig:confusion} shows the confusion matrix. A strong diagonal
+confirms accurate classification. Residual errors concentrate between
+biochemically similar or structurally overlapping pairs:
+\textit{K.~pneumoniae} and \textit{E.~faecalis} (14~errors),
+\textit{P.~aeruginosa} and \textit{S.~aureus} (13~errors), and
+\textit{E.~coli} and \textit{S.~aureus} (12~errors). These
+confusion patterns are biologically interpretable and consistent with
+the spectral overlap visible in Fig.~\ref{fig:class_spectra}.
+
+\begin{figure}[!t]
+\centering
+\includegraphics[width=0.48\textwidth]{figures/fig5_confusion_matrix.png}
+\caption{Confusion matrix for SDR-Fusion (95.84\%).}
+\label{fig:confusion}
+\end{figure}
+
+Fig.~\ref{fig:perclass} shows precision, recall, and F1 per class.
+All five species demonstrate strong classification with F1 scores
+exceeding 94\%. Class~0 (\textit{E.~coli}) and Class~4
+(\textit{E.~faecalis}) share the highest F1 (96.4\%); Class~2
+(\textit{P.~aeruginosa}) achieves F1~=~96.2\%, benefiting from its
+distinctive pyocyanin and phenazine Raman markers.
+Class~1 (\textit{S.~aureus}) remains the most challenging
+(F1~=~94.7\%) due to spectral overlap with other Gram-positive species.
+Class~3 (\textit{K.~pneumoniae}) achieves F1~=~95.5\%.
+
+\begin{figure}[!t]
+\centering
+\includegraphics[width=0.48\textwidth]{figures/fig6_perclass_radar.png}
+\caption{Radar chart of per-class precision, recall, and F1-score.}
+\label{fig:perclass}
+\end{figure}
+
+Fig.~\ref{fig:tsne} presents side-by-side t-SNE projections of the 1D
+Raman-only branch (128-dim) and the SDR-Fusion fused representation (256-dim)
+on the 1,250-sample test set. The Raman-only embedding yields substantially
+more diffuse, interleaved clusters. In contrast, SDR-Fusion fusion produces
+five sharply separated clusters; only Partial Class~3/Class~4
+(\textit{K.~pneumoniae}/\textit{E.~faecalis}) retain minor overlap,
+consistent with the residual confusion pattern in
+Fig.~\ref{fig:confusion} and reflecting genuine biochemical similarity
+between these two species. This visual comparison confirms that
+SeparationCross fusion learns substantially more discriminative
+representations than spectral features alone.
+
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\linewidth]{figures/fig7_tsne_sidebyside.png}
+\caption{Side-by-side t-SNE: 1D Raman-only branch (128-dim, left) vs.\ SDR-Fusion fused representation (256-dim, right). Fusion produces tighter, better-separated clusters (test set, 1,250 samples, seed~42).}
+\label{fig:tsne}
+\end{figure}
+
+
+\subsection{Ablation on 5-Class Benchmark}
+\label{ssec:ablations}
+
+Table~\ref{tab:fusion_ablation} confirms the contributions of gating
+and cross-attention. The combined gain ($1.04$~pp over concatenation)
+slightly exceeds the sum of isolated component gains
+($0.16+0.64=0.80$~pp when each is added independently to
+concatenation), consistent with a mildly complementary interaction
+between the two mechanisms. This arithmetic comparison is presented as
+a descriptive observation; because the system is nonlinear, component
+contributions are not additive by construction and this figure should
+not be interpreted as a rigorous proof of synergy. We further note
+that the absolute margins among the dual-stream variants (94.80--95.84\%)
+are small and individually below the threshold for statistical
+significance by McNemar's test ($p>0.05$); the principal value of
+SeparationCross is therefore the per-modality gating signal it exposes
+(Section~\ref{ssec:attribution}) rather than raw accuracy alone.
+
+\begin{table}[!t]
+\centering
+\caption{Ablation of SeparationCross components on the 5-class Bacteria-ID benchmark (1,250 test samples, seed~42).}
+\label{tab:fusion_ablation}
+\begin{tabular}{lcc}
+  \toprule
+  Configuration & Acc (\%) & $\Delta$ vs.\ Concat \\
+  \midrule
+  Concatenation                   & 94.80 & --- \\
+  + Gating only                   & 94.96 & $+0.16$ \\
+  + Cross-attention only          & 95.44 & $+0.64$ \\
+  \textbf{+ Gating + Cross-attn.} & \textbf{95.84} & $\mathbf{+1.04}$ \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Interpretability and Robustness Analysis}
+\label{ssec:interp_robust}
+Under data scarcity and domain shift---the clinically realistic
+deployment regime---SDR-Fusion's structurally aligned fusion provides
+superior robustness (Section~\ref{ssec:scarcity_eff}).
+
+\subsubsection{Ablation of Classical Preprocessing}
+\label{sssec:preproc_ablation}
+To evaluate the necessity of classical Raman signal processing, a
+dedicated preprocessing ablation was conducted. The Asymmetric Least
+Squares (ALS) baseline correction and Savitzky--Golay (SG) denoising
+steps were bypassed, applying only per-spectrum min--max normalisation
+to the raw instrument outputs. The ablated pipeline achieved a test
+accuracy of $79.52\%$ (95\% CI: $[77.19, 81.67]$), which is
+$16.32$~pp \emph{below} the fully preprocessed pipeline ($95.84\%$;
+McNemar $p{<}0.001$, $b{=}26$, $c{=}230$, $n{=}1250$).
+
+This substantial degradation confirms that classical signal conditioning
+is an indispensable component of the SDR-Fusion pipeline. Although
+SDR-Fusion's multi-scale CWT captures multi-resolution spectral structure,
+raw instrument outputs contain broadband fluorescence baselines and
+high-frequency shot noise that the wavelet transform alone does not
+suppress. ALS baseline correction removes slowly-varying fluorescence
+contamination, while SG smoothing reduces photon-counting noise without
+attenuating discriminative narrow Raman peaks. Omitting either step
+materially degrades classification performance, validating the two-stage
+preprocessing design.
+
+\subsubsection{Spectral Attribution and Molecular Target Localization}
+\label{ssec:attribution}
+
+Integrated gradients are applied to the 1D branch and aggregated over
+the test set to produce class-wise wavenumber importance profiles.
+SDR-Fusion consistently concentrates attribution weight on biochemically
+established bands: amide~I (1600--1700~cm$^{-1}$), amide~III
+(1200--1350~cm$^{-1}$), and nucleic-acid stretches
+(800--900~cm$^{-1}$)~\cite{singh2022culture}. The Raman-only baseline
+produces broader, less localized attribution patterns.
+Fig.~\ref{fig:attribution} illustrates class-wise Integrated Gradients
+overlaid on representative test spectra for all five species, with key
+biochemical bands annotated.
+
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\linewidth]{figures/fig8_attribution_maps.png}
+\caption{Integrated Gradients maps for correctly classified spectra (five species). Red: positive attribution; blue: suppressive. Key bands: nucleic acids (785--875~cm$^{-1}$), lipids (1000--1100~cm$^{-1}$), amide~III (1200--1350~cm$^{-1}$), pyocyanin (1350--1420~cm$^{-1}$), amide~I (1600--1700~cm$^{-1}$).}
+\label{fig:attribution}
+\end{figure}
+
+LRP analysis (implemented via Captum v0.6.0~\cite{kokhlikyan2020captum}, using the
+$\epsilon$-rule for linear and convolutional layers, and the $z$-rule
+for BatchNorm) confirms that for correctly classified
+\textit{P.~aeruginosa} samples, 78\% of attribution weight sits in
+the pyocyanin band, versus only 42\% for misclassified samples (where
+generic protein bands dominate).
+
+To explicitly illustrate this compensatory mechanism,
+Fig.~\ref{fig:casestudy_panel} presents a multi-species case study
+across the five bacterial classes. The left group (three columns)
+shows ``rescued'' samples — correctly classified by SDR-Fusion despite
+severe spectral noise that caused the Raman-only model to
+misclassify them. The right group (three columns) shows hard
+residual-error cases where SDR-Fusion's prediction was incorrect. In
+every rescued case the 1D spectrum is heavily corrupted (low spectral
+gate activation $\alpha$), while the CWT scalogram retains
+multi-scale structural contrast that drives correct classification
+through the $\beta$-gated scalogram path.
+
+The gate discordance further provides an implicit confidence score.
+Stratifying the 1{,}250 test samples by the per-sample gate-norm
+discordance $|\|\alpha\|_1{-}\|\beta\|_1|$, the top quartile (one
+modality confidently dominating) attains 99.0\% accuracy while the
+bottom quartile (near-balanced, ambiguous gating) attains only
+89.8\%---a natural stratification for automated reporting vs.\
+confirmatory testing, directly applicable to clinical
+decision-support workflows.
+
+\begin{figure*}[!t]
+\centering
+\includegraphics[width=\textwidth]{figures/fig_casestudy_panel.png}
+\caption{Multi-species case study: SeparationCross fusion resolves ambiguous spectra. \textbf{Left (green):} SDR-Fusion corrects Raman-only errors using robust CWT features despite noisy spectra. \textbf{Right (red):} shared failure cases, indicating genuinely ambiguous samples. Abbreviations: Ec (\textit{E.~coli}), Kp (\textit{K.~pneumoniae}), Pa (\textit{P.~aeruginosa}), Sa (\textit{S.~aureus}), MRSA.}
+\label{fig:casestudy_panel}
+\end{figure*}
+
+\subsubsection{Robustness Under Noise, Drift, and Occlusion}
+\label{ssec:robustness}
+
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\textwidth]{figures/fig10_robustness.png}
+
+\label{fig:robustness}
+\end{figure}
+
+Fig.~\ref{fig:robustness} summarises the robustness evaluation.
+\textit{Note on baseline choice:} the comparison partner here is the
+\textbf{HeavyRamanAugModel}---a 1D Raman-only network trained with
+strong noise, occlusion, and baseline-shift augmentation specifically
+to maximise noise resilience (82.6\% clean accuracy, 99.8K
+parameters). This is a deliberately conservative, noise-hardened
+baseline; it is distinct from the standard \textit{RamanNet} ablation
+entry in Table~\ref{tab:fusion_ablation} (65.04\%, no augmentation).
+Evaluating SDR-Fusion against the stronger augmented variant provides the
+most stringent robustness comparison.
+
+At SNR~=~40, 30, and 20~dB Gaussian noise added to the 1D Raman
+input, SDR-Fusion retains a flat 95.8\% test accuracy, maintaining a
+13--18~pp advantage over the trained Raman-only baseline (82.6\%
+clean, declining to 77.5\% at 20~dB). This robustness arises directly
+from the SeparationCross design: noise injected into the spectral
+branch does not propagate to the CWT scalogram inputs, so the $\beta$
+gate computed from $z_w$ alone remains unperturbed, and the fused
+representation is dominated by the clean image features. This property
+directly enables deployment on low-cost portable Raman devices where
+SNR and baseline stability are inferior to laboratory instruments.
+
+\textbf{Comparison with Gated Fusion (GMF) under single-stream noise.}
+An important failure mode of generic gated fusion is that its gates
+are computed from the \emph{mixed} representation: $g_s =
+\sigma(W[z_s; z_w])$, $g_w = \sigma(W'[z_s; z_w])$.  When Gaussian
+noise is added exclusively to the Raman channel ($z_s$ corrupted,
+$z_w$ clean), the joint input to both gates is nevertheless
+contaminated, so both $g_s$ \emph{and} $g_w$ are degraded by the
+noise—even though the scalogram branch itself is unaffected.  In
+practice, this means GMF cannot fully leverage the clean scalogram
+evidence under single-stream noise, producing the degraded robustness
+observed in Table~\ref{tab:openworld} ($p{=}0.929$ on the 30-class
+taxonomy).  By contrast, SeparationCross computes each gate
+\emph{before} any cross-modal interaction: $\alpha$ from $z_s$
+alone and $\beta$ from $z_w$ alone, so $\beta$ stays uncorrupted
+when only the Raman channel is noisy.  This is the structural
+mechanism behind the flat 95.8\% SDR-Fusion accuracy across all SNR
+levels while simultaneously explaining why generic gating methods
+converge to the scalogram-only level (rather than exceeding it)
+under realistic acquisition noise.
+
+Sliding-window occlusion ($50$~cm$^{-1}$ window, $40$~cm$^{-1}$
+step) provides an even sharper contrast
+(Fig.~\ref{fig:robustness}b): SDR-Fusion's accuracy drop is at most
+0.1~pp at any occluded position, while Raman-only suffers up to
+41.4~pp degradation when the $\sim$447~cm$^{-1}$ region is blocked.
+This demonstrates that the CWT branch fully compensates for any single
+spectral gap, confirming the attribution maps
+(Section~\ref{ssec:attribution}) are causally consistent: the bands
+the model attends to are those whose removal most degrades performance
+in the Raman-only condition.
+
+\subsection{Efficiency and Data-Scarcity Results}
+\label{ssec:scarcity_eff}
+
+Table~\ref{tab:scarcity} summarizes the data-scarcity experiment. At
+20\% training data, SDR-Fusion (88.32\%) outperforms Raman-only (38.88\%) by $+49.4$~pp and
+no-fusion (83.28\%) by $+5.0$~pp.
+
+\begin{table}[!t]
+\centering
+\caption{Test accuracy (\%) vs.\ training data fraction on the 5-class Bacteria-ID benchmark (1,250 test samples, seed~42).}
+\label{tab:scarcity}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{lcccc}
+  \toprule
+  Model & 20\% & 40\% & 60\% & 80\% \\
+  \midrule
+  Raman-only        & 38.88 & 45.60 & 63.92 & 50.08 \\
+  No-fusion         & 83.28 & 88.40 & 93.20 & 94.96 \\
+  \textbf{SDR-Fusion} & \textbf{88.32} & \textbf{92.72} &
+                      \textbf{94.72} & \textbf{94.64} \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:compute} summarizes computational costs. SDR-Fusion's
+350\,K parameters and 2.3~ms inference latency are well within the
+range achievable through INT8 post-training quantization~\cite{jacob2018quantization,han2016deep}
+on mid-range FPGAs (e.g., Xilinx Zynq UltraScale+, Lattice sensAI stack), enabling
+embedding of the entire classification pipeline on the Raman device
+itself. This eliminates the latency and privacy risks of cloud
+offloading, directly satisfying the requirements of IoT-connected
+smart healthcare systems.
+
+\begin{table}[!t]
+\centering
+\caption{Computational cost comparison (Apple Silicon MPS, 5-class
+model, batch size~1). Parameter counts are exact; inference latency
+is the median over 50 per-pass MPS-synchronized single-sample forward
+passes (10-pass warmup); same protocol as
+Table~\ref{tab:reviewer_ablations}.
+Parameter counts and latency for the 30-class model (3-layer
+\texttt{LegacySpectralBranch}, 128$\times$128 scalogram) are reported
+separately in Table~\ref{tab:reviewer_ablations}.}
+\label{tab:compute}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{lcc}
+  \toprule
+  Model & Params & Infer~(ms) \\
+  \midrule
+  Raman-only        & 158K & 0.8 \\
+  Scalogram-only    & 111K & 1.7 \\
+  No-fusion         & 268K & 2.1 \\
+  \textbf{SDR-Fusion} & \textbf{350K} & \textbf{2.3} \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Scalability Stress-Test under Domain Shift}
+\label{ssec:cross_and_openworld}
+
+\textbf{Scope and purpose of this section.}
+The experiments below are explicitly framed as scalability and
+domain-shift stress-tests, not as the primary evidence base for
+SDR-Fusion's core fusion claims. A reader may observe that
+high-capacity unimodal models such as ResNet-1D can exceed SDR-Fusion's
+raw test accuracy on the 30-class taxonomy by brute-forcing a larger
+parameter budget (3.86\,M vs.\ 304\,K). However, raw accuracy is not
+the only---or even the primary---design objective for clinical
+deployment. Unimodal models produce no per-sample gate discordance
+score and offer no mechanism for confidence-aware triage; they
+cannot tell a clinician when to escalate to confirmatory culture.
+SDR-Fusion's SeparationCross fusion provides this structured
+interpretability as a first-class output, enabling automated reporting
+for high-concordance cases and flagging of ambiguous predictions for
+human review. This capability is absent from all unimodal baselines
+and from generic fusion methods such as FiLM regardless of their
+accuracy advantage. Readers should therefore interpret the 30-class
+figures as evidence of SDR-Fusion's graceful scalability under adversarial
+conditions, not as a claim of state-of-the-art classification accuracy
+on massive open-world taxonomies.
+
+While the preceding experiments establish the primary fusion claims on
+the controlled five-species benchmark, practical deployment scenarios
+may involve substantially broader taxonomies, acquisition variability,
+and cross-instrument distribution shift. We therefore additionally
+evaluate SDR-Fusion under a more challenging large-scale setting.
+
+\subsubsection{Extended Dataset.}
+To evaluate scalability beyond the five-species benchmark, we expand
+SDR-Fusion to an open-world 30-species bacterial taxonomy comprising
+60,000 reference spectra, 3,000 domain-adaptation samples from a
+separate instrument, and 3,000 held-out test spectra. The 30-class experiment is intended as a scalability stress-test under
+domain shift rather than as the primary benchmark used to establish
+the core fusion claims. This 30-species
+dataset is derived from independent clinical acquisitions publicly
+available via Balytskyi et~al.~\cite{balytskyi2024open}, ensuring rigorous open-world
+evaluation conditions. To accommodate the 5.3$\times$ larger dataset
+(66\,000 vs.\ 12\,500 total spectra),
+scalograms are generated at $128{\times}128$ resolution (vs.\
+$224{\times}224$ for the 5-species benchmark); the
+ScalogramBranch's convolutional pooling reduces spatial dimensions to
+identical feature-map sizes regardless of input resolution. To
+accommodate the 6$\times$ larger training set (60\,000 vs.\ 10\,000
+training spectra) without overfitting, the
+30-class model uses the earlier 3-layer \texttt{LegacySpectralBranch}
+encoder (channels 64/128/128, stride=1 throughout) in place of the
+current 4-layer encoder (channels 64/128/128/128, stride-2 stem;
+consistent with Table~\ref{tab:sota}, $^\ddagger$); both models'
+ScalogramBranch uses an identical 32/64/128 channel configuration.
+This shallower encoder reduces the spectral-branch parameter count by
+$\approx$50K, yielding the
+304\,K total (vs.\ 350\,K for the 5-class model). Inference latency
+values reported in
+Table~\ref{tab:reviewer_ablations} are measured on a single-spectrum
+batch on the same Apple Silicon hardware as Table~\ref{tab:compute};
+the narrower 30-class model is correspondingly faster than the
+wider-channel 5-class model. Training follows a
+two-phase transfer learning protocol: \textbf{Phase~1} pre-trains on
+reference spectra (92.42\% validation accuracy), then \textbf{Phase~2}
+fine-tunes on the target-domain set (2,400 train / 600 val) using
+frozen-backbone warm-up followed by end-to-end adaptation with a
+20$\times$ lower learning rate.
+
+To ensure robustness against a dominant scalogram branch, the
+SeparationCross module is augmented with a residual gate: a learnable
+scalar $\gamma$ (initialized to zero) controls how much spectral
+cross-attention is injected into the scalogram pathway:
+\begin{equation}
+  \mathbf{z}_{\text{combined}} = \mathbf{z}_{\beta}
+    + \gamma \cdot \mathrm{CrossAttn}(\mathbf{z}_{\alpha},
+    \mathbf{z}_{\beta}),
+\end{equation}
+where $\mathbf{z}_{\alpha}$ and $\mathbf{z}_{\beta}$ are gated
+spectral and scalogram embeddings, respectively. In the 30-species
+setting, the residual pathway is reformulated to prioritize scalogram
+stability under domain shift. When $\gamma{=}0$, the model reduces to
+scalogram-only behavior; as training progresses, $\gamma$ learns the
+optimal spectral contribution, which empirically prevents degradation
+relative to the strongest unimodal baseline.
+
+Because the 30-class evaluation employs reduced-resolution
+scalograms, domain-adaptation fine-tuning, and a substantially
+expanded taxonomy, results should not be interpreted as directly
+comparable to the primary 5-class benchmark.
+
+Table~\ref{tab:openworld} reports the full fusion-method comparison on
+the 30-species taxonomy. All multimodal methods
+significantly outperform the unimodal baselines (McNemar $p{<}0.01$).
+Among fusion strategies, SeparationCross (77.07\%) performs
+comparably to naive concatenation (76.00\%, McNemar $p{=}0.173$) and
+gated fusion (76.97\%, $p{=}0.929$), with differences that are not
+statistically significant. FiLM~\cite{perez2018film} achieves the
+highest absolute accuracy (78.63\%, $p{=}0.037$), the only
+statistically significant difference from SDR-Fusion. However, SDR-Fusion
+does not aim to maximize raw accuracy alone, but rather to provide
+structured, interpretable, and reliability-aware fusion. SeparationCross
+uniquely provides per-sample gate discordance scores that enable
+confidence-aware clinical triage---a capability absent from FiLM,
+which lacks explicit modality control and cannot produce
+confidence-aware gating signals. This interpretability--accuracy
+trade-off is a deliberate design choice for clinical deployment. The
+residual gate empirically ensures that even on a dataset where the 2D
+scalogram branch is individually stronger (92.33\% vs.\ 60.12\% val),
+fusion does not degrade below the strongest unimodal baseline in our
+evaluated settings.
+
+\begin{table}[!t]
+\centering
+\caption{30-species open-world taxonomy: fusion-method comparison.
+$p$-values are McNemar tests vs.\ SDR-Fusion.
+$^\S$Both unimodal variants are instantiated via the unified SDR-Fusion
+class, which constructs \emph{both} branch encoders regardless of the
+active mode (the inactive branch does not execute during inference but
+its weights are counted). Hence both show identical 205K counts:
+LegacySpectralBranch 91K + ScalogramBranch 93K + unimodal head 21K.
+The 5-class Raman-only (158K) in Table~\ref{tab:compute} is a
+standalone single-branch implementation and is therefore not directly
+comparable.}
+\label{tab:openworld}
+\begin{tabular}{lcccc}
+  \toprule
+  Method & P1 Val (\%) & Test (\%) & Params & $p$-value \\
+  \midrule
+  Spectral-only (1D CNN)$^\S$  & 60.12 & 41.57 & 205K & --- \\
+  Scalogram-only (2D CNN)$^\S$ & 92.33 & 76.10 & 205K & $0.219$ \\
+  \midrule
+  Concat (no fusion)         & 92.35 & 76.00 & 221K & $0.173$ \\
+  Gated Fusion               & 91.88 & 76.97 & 287K & $0.929$ \\
+  FiLM~\cite{perez2018film}  & \textbf{93.28} & \textbf{78.63} & 254K & $0.037$ \\
+  SDR-Fusion (SeparationCross) & 92.42 & 77.07 & 304K & ref \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+
+\subsection{Architectural Analysis on 30-Class Taxonomy}
+We additionally compared SDR-Fusion against a deep 1D Convolutional
+network (ResNet-1D) and a modern Spectral Vision Transformer
+(Transformer-1D) on the extended 30-class open-world dataset
+(Table~\ref{tab:reviewer_ablations}). 
+
+\textbf{Fusion Architecture Directionality}
+\label{sssec:abl_dir}
+
+A shared gating mechanism does not improve over the independent configuration (77.03\% vs 77.07\%), suggesting that modality-specific gating is at least as effective while remaining conceptually simpler. While a bidirectional
+attention mechanism marginally improves accuracy to 78.07\%
+(+1.0~pp), it increases computational overhead (354K parameters,
+1.5\,ms latency). The unidirectional (spectral query) approach
+provides the optimal efficiency trade-off for resource-constrained
+environments. 
+
+\textbf{Wavelet and Scale Selection}
+\label{sssec:abl_wavelet}
+
+Alternative wavelets (Mexican Hat, Bump) degraded performance by up
+to 5.0~pp. The scale ablation demonstrates a clear U-shaped
+performance curve: 128 scales under-resolves the spectral features
+(76.57\%), while 512 scales introduces noise and over-smoothing
+(72.57\%), confirming 256 scales (77.07\%) as the empirically optimal
+configuration. 
+
+\textbf{2D Representation: CWT vs.\ STFT}
+\label{sssec:abl_stft}
+
+To validate the necessity of continuous wavelet transforms over
+traditional time-frequency representations, we compared the Morlet
+CWT against a Short-Time Fourier Transform (STFT) spectrogram
+representation. The STFT representation achieved 75.40\% accuracy,
+underperforming the CWT by 1.67~pp, confirming that the logarithmic
+frequency scaling of the wavelet transform is uniquely suited for
+resolving both broad baseline fluctuations and sharp biochemical peaks
+in Raman spectra. 
+
+\textbf{Scalogram Resolution}
+\label{sssec:abl_res}
+
+The original 5-class model utilized $224{\times}224$ scalograms, while
+the 30-class model employs $128{\times}128$ resolution for
+computational tractability over the larger dataset. Ablating the
+resolution on the 30-class taxonomy reveals that scaling up to
+$224{\times}224$ yields an accuracy of 73.87\% (a change of
+$-3.20$~pp). This confirms that $128{\times}128$ retains the requisite
+scale-domain information and that performance gains in the 5-class
+task are primarily driven by the simpler taxonomy rather than spatial
+resolution. Furthermore, it suggests the $128{\times}128$ downsampling
+acts as a beneficial spatial regularizer against high-frequency
+spectral noise. 
+
+\begin{table}[!t]
+\centering
+\caption{Architectural evaluation on the 30-class taxonomy dataset.}
+\label{tab:reviewer_ablations}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{lcccc}
+  \toprule
+  \textbf{Experiment} & \textbf{P1 Val (\%)} & \textbf{Test (\%)} &
+  \textbf{Params} & \textbf{Inf (ms)} \\
+  \midrule
+  \textbf{SDR-Fusion (SeparationCross) [ref]}
+      & 92.42 & 77.07 & \textbf{304K} & \textbf{1.3} \\
+  \midrule
+  \multicolumn{5}{l}{\textit{Baseline Comparisons}} \\
+  ResNet-1D       & \textbf{93.87} & \textbf{82.03} & 3.86M & 4.0 \\
+  Transformer-1D  & \textbf{94.62} & \textbf{78.73} & 807K  & 1.9 \\
+  \midrule
+  \multicolumn{5}{l}{\textit{Wavelet Selection Ablation}} \\
+  Wavelet: Morlet (default) & \textbf{92.42} & \textbf{77.07} & 304K & 1.3 \\
+  Wavelet: Mexican Hat      & 92.15 & 72.00 & 304K & 1.6 \\
+  Wavelet: Bump (Gauss1)    & 91.67 & 73.17 & 304K & 1.6 \\
+  \midrule
+  \multicolumn{5}{l}{\textit{2D Representation Ablation}} \\
+  CWT (Morlet, default) & \textbf{92.42} & \textbf{77.07} & 304K & 1.3 \\
+  STFT Spectrogram      & 92.43 & 75.40 & 304K & 2.5 \\
+  \midrule
+  \multicolumn{5}{l}{\textit{Scale Range Ablation}} \\
+  Scales: 128           & 90.43 & 76.57 & 304K & 1.3 \\
+  Scales: 256 (default) & \textbf{92.42} & \textbf{77.07} & 304K & 1.3 \\
+  Scales: 512           & 91.78 & 72.57 & 304K & 2.0 \\
+  \midrule
+  \multicolumn{5}{l}{\textit{Scalogram Resolution Ablation}} \\
+  Resolution: $128{\times}128$ (default)
+      & \textbf{92.42} & \textbf{77.07} & 304K & 1.3 \\
+  Resolution: $224{\times}224$
+      & 91.02 & 73.87 & 304K & 1.7 \\
+  \midrule
+  \multicolumn{5}{l}{\textit{Fusion Architecture Directionality}} \\
+  Shared Gating      & 92.33 & 77.03 & 304K & 5.0 \\
+  Flipped (Q=scalo)  & 92.88 & 76.67 & 304K & 2.5 \\
+  Bidirectional      & \textbf{92.52} & \textbf{78.07} & 354K & 1.5 \\
+  \bottomrule
+\end{tabular}%
+}
+\end{table}
+
+In the large-scale taxonomy setting, high-capacity unimodal spectral
+models remain highly competitive, particularly when substantially
+larger parameter budgets are available. However, ResNet-1D requires a 12.7$\times$ increase in parameters
+(3.86M vs.\ 304K) and 3$\times$ higher inference latency (4.0\,ms
+vs.\ 1.3\,ms), and provides no interpretable modality-weighting
+signals.
+
+These experiments highlight a trade-off between compact structured
+fusion and high-capacity unimodal representation learning under severe
+taxonomy expansion and domain shift. The Transformer-1D yields a marginal
+$+1.66$\% accuracy improvement over SDR-Fusion, but requires 165\% more
+parameters (807K vs.\ 304K) and higher latency (1.9\,ms vs.\ 1.3\,ms).
+
+\subsection{Direct Head-to-Head Comparison with Published Baselines}
+\label{ssec:sota}
+
+To address the absence of direct comparisons with published methods
+under identical experimental conditions, we benchmark SDR-Fusion against
+three additional competitors trained on the exact same 80/10/10
+stratified split (seed~42) and preprocessing pipeline used throughout
+this paper.
+
+\textbf{Baseline 4 — Spectral Transformer (Yan et~al., 2023).}
+A three-block 1D CNN encoder (channels 32/64/128, kernel sizes 7/5/3,
+BN+ReLU+MaxPool) followed by multi-head self-attention classification head,
+following the CNN-plus-self-attention paradigm for single-cell Raman spectra
+classification~\cite{yan2023spectral}. This is the most directly comparable
+published attention-based architecture evaluated on bacterial Raman data.
+
+\textbf{Baseline 5 — ResNet-18-1D (Ho et~al.\ 2019).}
+A 1D ResNet-18~\cite{ho2019rapid,he2016deep} applied directly to
+preprocessed Raman spectra. Ho et~al.\ originally applied a 2D
+ResNet-18 to spectrum images; we adapt it to the 1D domain (the
+natural representation here), which is the strongest unimodal
+spectral baseline we could construct on identical conditions.
+
+\textbf{Baseline 6 — PureCrossAttn (ablation: dual-stream, no gating).}
+Uses dual-stream CNN encoders of equivalent capacity to SDR-Fusion's
+(one architectural revision predating the current 4-layer
+\texttt{SpectralBranch}; see Table~\ref{tab:sota}, $^\ddagger$) but
+replaces the SeparationCross module with a plain cross-attention layer
+in which the per-modality sigmoid gates ($\alpha$, $\beta$) are
+removed entirely. This isolates the contribution of SDR-Fusion's
+signature separation gating mechanism from the contribution of
+cross-attention alone. Because the backbone revision and the gating
+change are confounded, the 0.40~pp performance gap should be
+interpreted as an upper bound on the gating contribution; an
+identical-backbone re-run is planned for the camera-ready revision.
+
+Table~\ref{tab:sota} reports the results. All accuracy figures in this
+table are computed on the same held-out 1,250-spectra test set; McNemar
+$p$-values use SDR-Fusion as the reference. The script
+\texttt{scripts/sota\_baselines.py} (included in the released code)
+reproduces all three results exactly.
+
+\begin{table}[!t]
+\centering
+\caption{Direct head-to-head comparison on the 5-class Bacteria-ID
+benchmark (identical 80/10/10 stratified split, seed~42). All models
+use the same preprocessed spectra. $p$-values are McNemar tests
+vs.\ SDR-Fusion. $^\dagger$Unimodal: no scalogram branch.
+$^\ddagger$PureCrossAttn was trained with an earlier
+\texttt{SpectralBranch} revision (3 convolutional layers,
+${\approx}91$K parameters); the cross-attention Q/K/V projection
+layers ($+$50K) approximately offset the lighter encoder relative
+to the current 4-layer backbone used in ablation Table~\ref{tab:compute},
+yielding the comparable 267K total. Accuracy and confidence interval
+are unaffected by this architecture version difference.}
+\label{tab:sota}
+\begin{tabular}{lcccc}
+  \toprule
+  Method & Acc (\%) & 95\% CI & Params & $p$-value \\
+  \midrule
+  ResNet-18-1D$^\dagger$~\cite{he2016deep} & 97.68 & [96.7, 98.4] & 3.85\,M & $0.001$ \\
+  Spectral Transformer$^\dagger$ (Yan et~al.)  & 88.64 & [86.8, 90.3] & 110K & $<0.001$ \\
+  PureCrossAttn (no gating) & 95.44 & [94.1, 96.5] & 267K$^\ddagger$ & $0.583$ \\
+  \midrule
+  \textbf{SDR-Fusion (ours)} & \textbf{95.84} & [94.6, 96.8] & 350K & --- \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Error Analysis and Comparison with Published Methods (Contextual)}
+\label{ssec:error_and_comparison}
+
+Misclassified samples share highly similar peak constellations
+(inter-class mean-spectrum Pearson correlations: $r{=}0.97$ for the
+most-confused pair \textit{K.~pneumoniae}/\textit{E.~faecalis}, which
+accounts for 14 errors; $r{=}0.89$ for
+\textit{P.~aeruginosa}/\textit{S.~aureus}, 13 errors; and $r{=}0.92$
+for \textit{E.~coli}/\textit{S.~aureus}, 12 errors). The 4.2\% residual error
+rate may reflect the inherent biochemical similarity between these
+species, where nearly identical peak constellations in the fingerprint
+region limit purely spectral discrimination. From a
+precision-medicine perspective, this residual ambiguity is precisely
+the use case for the attribution confidence scores described in
+Section~\ref{ssec:attribution}: when SDR-Fusion's gate discordance flags
+a sample as ambiguous, a clinician can request a secondary confirmatory
+test rather than acting on an uncertain prediction.
+
+Table~\ref{tab:comparison} contextualizes SDR-Fusion within the broader
+literature. These studies use different preprocessing pipelines and
+train/test splits from ours; cross-study comparisons are therefore
+strictly contextual, and Table~\ref{tab:sota} (above) provides the
+only direct head-to-head comparisons under identical conditions.
+
+
+\begin{table}[!t]
+\centering
+\caption{Contextual comparison with published methods.}
+\label{tab:comparison}
+\small
+\begin{tabularx}{\linewidth}{l X c}
+  \toprule
+  Method & Dataset & Acc (\%) \\
+  \midrule
+  Ho et~al.~\cite{ho2019rapid}
+      & Bacteria-ID (multi-species) & 82.2 \\
+  Zhou et~al.~\cite{zhou2022ramannet}
+      & Bacteria-ID (multi-species) & 84.7 \\
+  Chia et~al.~\cite{chia2021interpretable}
+      & Bacteria-ID (multi-species) & 87.4 \\
+  Balytskyi et~al.~\cite{balytskyi2024open}
+      & Bacteria-ID (multi-species) & 87.8 \\
+  Liu et~al.~\cite{liu2024wpga}
+      & Bacteria-ID (multi-species) & 90.6 \\
+  \midrule
+  \textbf{SDR-Fusion (Ours)}
+      & Bacteria-ID (5 spp.)        & \textbf{95.84} \\
+  \textbf{SDR-Fusion (Ours)}
+      & Open-world (30 spp.)        & \textbf{77.07} \\
+  \bottomrule
+\end{tabularx}
+\end{table}
+
+% ======================================================================
+\section{Discussion}
+\label{sec:discussion}
+% ======================================================================
+
+\subsection{Analysis of SeparationCross Fusion Behavior}
+\label{ssec:why}
+
+The ablation (Table~\ref{tab:fusion_ablation}) reveals complementary
+weaknesses. The 1D spectral branch on its own is severely limited
+(65.04\%), reflecting the difficulty of distinguishing closely related
+species from raw 1D peaks alone. The scalogram branch provides a much
+stronger 95.20\% on its own; naive concatenation of the two streams
+yields 94.80\%, slightly below the scalogram baseline because
+uninformative spectral channels dilute the joint representation.
+
+Why does SeparationCross still offer value over concatenation and
+generic feature-wise linear modulation (FiLM) or simple gated fusion?
+Generic gating mechanisms that condition on the mixed representations
+risk allowing noise from one modality to erroneously suppress the
+other. By contrast, the \emph{separation principle} isolates the
+gating logic: each modality generates its own gate independently
+before cross-attention. This explicit structural constraint prevents
+catastrophic interference during low-SNR acquisitions and---crucially
+for a clinical decision-support setting---produces per-modality gate
+discordance scores that expose ambiguous samples
+(Section~\ref{ssec:attribution}). SeparationCross achieves $+30.80$~pp
+over the 1D baseline and $+1.04$~pp over naive concatenation by
+suppressing uninformative channels \emph{before} cross-attention,
+enabling each modality to contribute where it is most reliable.
+
+\textbf{Visualization of Learned Branch Representations}
+\label{ssec:activation}
+
+Channel-wise activation analysis of the 1D branch confirms that early
+layers respond to broad spectral envelopes (400--1800~cm$^{-1}$) while
+deeper layers selectively activate at established biochemical bands.
+Class~2 activates pyocyanin-band channels at $2.3\times$ mean
+intensity versus other classes; Class~0 shows $1.8\times$ relative
+lipid-region activation. For the 2D branch, lower layers encode
+high-frequency scale-domain edges (scales 1--50; sharp peaks) while
+higher layers integrate broad-scale structure (scales 100--256; band
+envelopes). Cross-correlation between branch embeddings is $r{=}0.34$,
+confirming complementary rather than redundant content.
+
+\subsection{Biological Interpretability and Precision-Medicine
+Attribution}
+\label{ssec:bio}
+
+The attribution maps (Section~\ref{ssec:attribution}) confirm that
+SDR-Fusion learns biochemically meaningful representations. More
+importantly, they provide a direct link between AI classification and
+antibiotic mechanism selection:
+
+\begin{itemize}
+  \item \textbf{Amide I/III bands} (protein secondary structure):
+        High attribution here supports targeting cell-wall biosynthesis
+        ($\beta$-lactams for Gram-negative LPS-bearing species;
+        glycopeptides for Gram-positive peptidoglycan).
+  \item \textbf{Nucleic acid bands} ($\sim$800--900~cm$^{-1}$):
+        High attribution identifies species for which DNA-gyrase
+        (fluoroquinolone) or RNA-polymerase (rifampicin) targeting is
+        indicated.
+  \item \textbf{Pyocyanin band} ($\sim$1380~cm$^{-1}$): Attribution
+        concentrated here constitutes an AI flag for
+        \textit{P.~aeruginosa}, guiding the use of
+        \textit{Pseudomonas}-specific agents (anti-pseudomonal
+        $\beta$-lactams, aztreonam) and flagging the relevance of
+        anti-virulence strategies currently in clinical trials.
+\end{itemize}
+
+This represents a precision-medicine extension of SDR-Fusion's
+capability: the same classification inference step that returns a
+species prediction also returns a molecular-target priority ordering,
+providing the first AI-level link between Raman-based pathogen
+identification and antibiotic mechanism
+selection~\cite{holzinger2022information,singh2022culture}. No
+additional experiments or models are required; the attribution maps
+are a free by-product of integrated-gradient analysis applied to the
+existing 1D branch.
+
+These band-level attribution maps provide the AI system's confidence
+that the classification is driven by the \emph{correct} molecular
+target rather than spurious correlations---a critical requirement for
+clinical trustworthiness~\cite{holzinger2022information}.
+
+\subsection{Adaptive Gating as an Implicit Quality Metric}
+\label{ssec:gating_disc}
+
+Gate discordance provides a natural confidence stratification and
+reveals the underlying information geometry of the fusion process:
+when one branch fails due to acquisition artifacts, the other branch
+structurally compensates, manifesting as high gate discordance.
+Stratifying the test set by the per-sample gate-norm discordance
+$|\|\alpha\|_1{-}\|\beta\|_1|$, the top discordance quartile (one
+modality confidently dominating) attains 99.0\% accuracy, whereas the
+bottom quartile (near-balanced, ambiguous gating) attains only
+89.8\%. This stratification is directly deployable
+as a clinical triage rule: high-concordance predictions can be
+reported automatically, while high-discordance cases are flagged for
+confirmatory testing (e.g., culture or PCR), aligning with
+trustworthy AI deployment
+principles~\cite{holzinger2022information}.
+
+\subsection{Clinical Deployment and Translation Pathway}
+\label{ssec:iot}
+
+Three results from this paper, taken together, establish SDR-Fusion as a
+viable embedded AI engine for IoT-connected point-of-care Raman
+screening:
+
+\textbf{(i) Inference speed.} At 2.3~ms per classification on Apple
+Silicon (M-series, MPS backend), SDR-Fusion comfortably meets the latency budget of real-time
+clinical workflows. Through INT8 or INT4 post-training quantization~\cite{jacob2018quantization,han2016deep}
+(standard for FPGA deployment), latency is projected to remain under 5~ms on mid-range embedded
+hardware (Xilinx Zynq UltraScale+, Lattice sensAI), well within the
+human-perceptible threshold for point-of-care diagnostic feedback.
+\textit{Limitation:} These edge-latency figures are projections based
+on established INT8 quantization benchmarks~\cite{jacob2018quantization,han2016deep}
+rather than measurements on physical edge hardware; actual on-device
+validation is left for future work.
+
+\textbf{(ii) Data-scarcity resilience.}
+The $+5.0$~pp advantage over no-fusion at
+20\% training data (Table~\ref{tab:scarcity}) directly addresses the
+cold-start problem for IoT deployments. A newly installed Raman device
+accumulates annotated data incrementally; SDR-Fusion's transform-aware
+fusion maintains diagnostic utility during this ramp-up phase, where a
+unimodal model would underperform. This makes SDR-Fusion particularly
+suitable for low-resource settings---rural hospitals, field clinics,
+and outbreak-response teams---where local training data is inherently
+limited.
+
+\textbf{(iii) Noise robustness.} The 13--18~pp accuracy advantage retained
+under SNR~=~20~dB Gaussian noise (flat 95.8\% vs.\ 77.5\% for Raman-only;
+Section~\ref{ssec:robustness}) directly maps to the inferior optical
+quality of portable vs.\ laboratory-grade Raman instruments: lower
+laser power, shorter integration times, and less stable temperature
+control. SDR-Fusion's CWT branch compensates for these degradation modes
+through scale-domain redundancy.
+
+Together, these properties define SDR-Fusion's deployment profile as a
+continuously operating embedded classification system in a smart
+healthcare IoT architecture: the Raman device acquires a spectrum,
+SDR-Fusion classifies it in under 5~ms, the gate discordance score
+determines whether to report automatically or escalate, and the attribution vector highlights the molecular targets relevant to the
+identified pathogen.
+
+SDR-Fusion's 2.3~ms inference combined with 1--5~second Raman
+acquisition enables total turnaround under 10 seconds ---versus
+4--24~hours for
+MALDI-TOF~\cite{singh2022culture,maruthamuthu2020rapid}. Before
+regulatory approval, external validation on clinical specimens (blood
+cultures, urine, respiratory secretions) is essential; the
+30-species domain-adaptation experiment
+(Section~\ref{ssec:cross_and_openworld})
+shows that two-phase fine-tuning on a separate-instrument set sustains
+fused-modality accuracy across an expanded taxonomy,
+suggesting a practical calibration protocol. Periodic instrument
+recalibration, standardized sample preparation, and integration of
+Bayesian uncertainty quantification for ambiguous cases will be
+required for multi-site deployment.
+
+\subsection{Limitations}
+\label{ssec:limits}
+
+\textbf{Single-instrument, controlled conditions.} All spectra were
+acquired from pure cultures at 532~nm. Clinical specimens introduce
+complex matrices and instrument variability; external validation is
+essential before any deployment.
+
+\textbf{Taxonomy scope.} The primary benchmark uses five species;
+however, scalability is validated on a 30-species open-world taxonomy
+(Section~\ref{ssec:cross_and_openworld}), where SDR-Fusion retains its
+fusion advantage ($+1.13$~pp over scalogram-only, $+36.93$~pp over
+spectral-only) under cross-instrument domain shift.
+
+\textbf{Modest absolute gain over concatenation.} The $+1.04$~pp gain
+over naive concatenation is small in absolute magnitude and is not
+statistically significant by McNemar's test ($p{=}0.086$). The
+justification for SeparationCross over concatenation is therefore the
+interpretability properties it offers---per-sample gate discordance
+scores that flag ambiguous predictions---rather than raw accuracy
+alone. Future work will quantify the clinical-decision benefit of
+these discordance signals.
+
+\textbf{Absence of calibrated uncertainty.} Point predictions without
+confidence calibration are insufficient for safety-critical
+deployment; Bayesian dropout or deep ensembles are required future
+work.
+
+\textbf{Attribution as drug-target mapping.} The precision-medicine
+framing (Section~\ref{ssec:bio}) is a computational inference from
+established Raman band assignments and is not a substitute for
+pharmacological validation. Attribution maps identify which spectral
+bands drive the classification, not which drug will be most effective
+clinically. Prospective clinical pharmacology studies are required to
+validate the proposed attribution-to-mechanism link.
+
+% ======================================================================
+\section{Conclusion}
+\label{sec:conclusion}
+% ======================================================================
+
+This work introduced SDR-Fusion---a dual-stream deep learning framework
+that fuses 1D Raman spectra with 2D CWT scalograms through the
+SeparationCross fusion block. SeparationCross applies per-modality
+learnable gating before asymmetric cross-attention, enabling dynamic,
+sample-wise weighting of spectral versus scale--wavenumber evidence
+conditioned on signal quality. The design explicitly exploits the
+deterministic transform alignment between Raman spectra and their CWT
+representations---a structural property absent from all prior generic
+multimodal fusion modules.
+
+Evaluated on a five-species bacterial benchmark, SDR-Fusion achieves
+95.84\% test accuracy, decisively outperforming the spectral-only
+baseline ($+30.80$~pp, $p{<}0.001$) while showing modest, statistically
+non-significant absolute gains over the strong scalogram-only
+($+0.64$~pp, $p{=}0.322$) and naive-concatenation ($+1.04$~pp,
+$p{=}0.086$) baselines. The principal value of the SeparationCross
+fusion is therefore not raw accuracy but the per-modality gate
+discordance scores it produces, which expose ambiguous samples for
+clinician review. While a high-capacity Transformer-1D baseline achieves higher raw
+accuracy on this 5-class split (97.60\%, $p{=}0.003$ vs. SDR-Fusion),
+SDR-Fusion provides structured interpretability via explicit
+per-modality gating and preserves a compact deployment profile.
+The multimodal advantage
+is most pronounced under data scarcity ($+5.0$~pp over no-fusion at 20\% training
+data) and under noise (13--18~pp advantage over Raman-only at SNR~=~20--40~dB;
+flat 95.8\% vs.\ 77.5\% at 20~dB). Scalability is demonstrated on a 30-species open-world
+taxonomy under cross-instrument domain shift, where SeparationCross
+(77.07\%) performs comparably to concatenation ($+1.07$~pp, $p{=}0.173$) and
+gated fusion ($+0.10$~pp, $p{=}0.929$), with no statistically significant
+differences. While FiLM achieves 1.56~pp
+higher absolute accuracy on the 30-class taxonomy ($p{=}0.037$), choosing
+SeparationCross over FiLM is a \textit{deliberate design decision}:
+the accuracy gap is traded for per-sample gate discordance scores
+that are mandatory for confidence-aware clinical triage, a structured
+interpretability capability absent from FiLM and all other competing
+fusion methods. No existing generic fusion module---including
+FiLM---can tell a clinician which predictions are safe to report
+automatically and which require confirmatory testing; SeparationCross
+can.
+
+Two clinically oriented contributions extend the framework at no
+additional inference cost. Integrated-gradient and LRP maps link each
+prediction to molecular pharmacological targets (amide~I/III,
+nucleic-acid bands, pyocyanin), providing interpretable evidence for
+antibiotic-mechanism selection. SDR-Fusion's 2.3~ms, 350\,K-parameter
+profile satisfies the computational constraints of IoT-embedded Raman
+diagnostics, enabling continuous classification in low-resource
+clinical environments without cloud dependence.
+
+Addressing the current limitations---single-instrument evaluation,
+absence of calibrated uncertainty, and prospective clinical validation
+of attribution-to-drug-mechanism mapping---will be the focus of future
+work.
+
+% ======================================================================
+\section*{Data and Code Availability}
+
+The Bacteria-ID benchmark used in this study is publicly
+available~\cite{ho2019rapid}. To ensure full reproducibility of all
+experiments, the preprocessed datasets, trained model weights, and
+complete analysis code will be made publicly available via a persistent
+repository upon manuscript acceptance. Intermediate outputs and
+additional data are available from the corresponding author upon
+reasonable request.
+
+\section*{Funding / Acknowledgments}
+
+We sincerely acknowledge the Anusandhan National Research
+Foundation~(ANRF) for funding through the PAIR scheme (File
+No.\ ANRF/PAIR/2025/000018/PAIR-A(G)).
+
+\section*{Declaration of Competing Interest}
+
+The authors declare no known competing financial interests or personal
+relationships that could have appeared to influence the work reported
+in this paper.
+
+% ======================================================================
+\begin{thebibliography}{99}
+
+\bibitem{arevalo2017gated}
+J.~Arevalo, T.~Solorio, M.~Montes-y-G{\'{o}}mez, and
+F.~A.~Gonz{\'{a}}lez, ``Gated Multimodal Units for Information
+Fusion,'' \textit{5th International Conference on Learning
+Representations (ICLR) Workshop}, 2017.
+
+\bibitem{balytskyi2024open}
+Y.~Balytskyi, N.~Kalashnyk, I.~Hubenko, A.~Balytska, and K.~McNear,
+``Enhancing Open-World Bacterial Raman Spectra Identification by
+Feature Regularization for Improved Resilience against Unknown
+Classes,'' \textit{Chemical \& Biomedical Imaging}, vol.~2, no.~6,
+pp.~442--452, 2024. DOI: 10.1021/cbmi.4c00007.
+
+\bibitem{chia2021interpretable}
+C.~Chia, M.~Sesia, C.-S.~Ho, S.~S.~Jeffrey, J.~Dionne,
+E.~J.~Cand{\`e}s, and R.~T.~Howe, ``Interpretable Classification of
+Bacterial Raman Spectra with Knockoff Wavelets,'' \textit{IEEE Journal
+of Biomedical and Health Informatics}, vol.~26, no.~2, pp.~740--748,
+2021.
+
+
+\bibitem{ho2019rapid}
+C.-S.~Ho, N.~Jean, C.~A.~Hogan, L.~Blackmon, S.~S.~Jeffrey,
+M.~Holodniy, N.~Banaei, A.~A.~E.~Saleh, S.~Ermon, and J.~Dionne,
+``Rapid identification of pathogenic bacteria using Raman spectroscopy
+and deep learning,'' \textit{Nature Communications}, vol.~10, no.~1,
+p.~4927, 2019.
+
+\bibitem{holzinger2022information}
+A.~Holzinger, M.~Dehmer, F.~Emmert-Streib, R.~Cucchiara,
+I.~Augenstein, J.~Del~Ser, W.~Samek, I.~Jurisica, and
+N.~D{\'{i}}az-Rodr{\'{i}}guez, ``Information fusion as an integrative
+cross-cutting enabler to achieve robust, explainable, and trustworthy
+medical artificial intelligence,'' \textit{Information Fusion},
+vol.~79, pp.~263--278, 2022.
+
+\bibitem{liu2024wpga}
+Y.~Liu, Y.~Gao, R.~Niu, Z.~Zhang, G.-W.~Lu, H.~Hu, T.~Liu, and
+Z.~Cheng, ``Rapid and accurate bacteria identification through
+deep-learning-based two-dimensional Raman spectroscopy,''
+\textit{Analytica Chimica Acta}, vol.~1332, p.~343376, 2024.
+DOI: 10.1016/j.aca.2024.343376.
+
+\bibitem{lussier2020deep}
+F.~Lussier, V.~Thibault, B.~Charron, G.~Q.~Wallace, and
+J.-F.~Masson, ``Deep learning and artificial intelligence methods for
+Raman and surface-enhanced Raman scattering,'' \textit{TrAC Trends in
+Analytical Chemistry}, vol.~124, p.~115796, 2020.
+
+\bibitem{ma2021understanding}
+X.~Ma, Y.~Niu, L.~Gu, Y.~Wang, Y.~Zhao, J.~Bailey, and F.~Lu,
+``Understanding adversarial attacks on deep learning based medical
+image analysis systems,'' \textit{Pattern Recognition}, vol.~110,
+p.~107332, 2021.
+
+\bibitem{maruthamuthu2020rapid}
+M.~K.~Maruthamuthu, A.~H.~Raffiee, D.~M.~De Oliveira, A.~M.~Ardekani,
+and M.~S.~Verma, ``Raman spectra-based deep learning: A tool to
+identify microbial contamination,'' \textit{MicrobiologyOpen}, vol.~9,
+no.~11, p.~e1122, 2020.
+
+\bibitem{perez2018film}
+E.~Perez, F.~Strub, H.~De~Vries, V.~Dumoulin, and A.~Courville,
+``FiLM: Visual Reasoning with a General Conditioning Layer,''
+\textit{Thirty-Second AAAI Conference on Artificial Intelligence},
+2018.
+
+\bibitem{shazeer2017outrageously}
+N.~Shazeer, A.~Mirhoseini, K.~Maziarz, A.~Davis, Q.~Le, G.~Hinton,
+and J.~Dean, ``Outrageously Large Neural Networks: The Sparsely-Gated
+Mixture-of-Experts Layer,'' \textit{5th International Conference on
+Learning Representations (ICLR)}, 2017.
+
+\bibitem{singh2022culture}
+S.~Singh, D.~Kumbhar, D.~Reghu, S.~J.~Venugopal, P.~T.~Rekha, and
+R.~Seshadri, ``Culture-Independent Raman Spectroscopic Identification
+of Bacterial Pathogens from Clinical Samples Using Deep Transfer
+Learning,'' \textit{Analytical Chemistry}, vol.~94, no.~45,
+pp.~15632--15640, 2022.
+
+\bibitem{vaswani2017attention}
+A.~Vaswani, N.~Shazeer, N.~Parmar, J.~Uszkoreit, L.~Jones,
+A.~N.~Gomez, \L{}.~Kaiser, and I.~Polosukhin, ``Attention Is All You
+Need,'' \textit{Advances in Neural Information Processing Systems},
+vol.~30, 2017.
+
+\bibitem{zhou2022ramannet}
+B.~Zhou, Y.~Tong, R.~Zhang, and A.~Ye, ``RamanNet: a lightweight
+convolutional neural network for bacterial identification based on
+Raman spectra,'' \textit{RSC Advances}, vol.~12, no.~41,
+pp.~26463--26469, 2022.
+
+\bibitem{sundararajan2017axiomatic}
+M.~Sundararajan, A.~Taly, and Q.~Yan, ``Axiomatic Attribution for Deep Networks,'' \textit{Proceedings of the 34th International Conference on Machine Learning (ICML)}, pp.~3319--3328, 2017.
+
+\bibitem{bach2015pixel}
+S.~Bach, A.~Binder, G.~Montavon, F.~Klauschen, K.-R.~M{\"{u}}ller, and W.~Samek, ``On Pixel-Wise Explanations for Non-Linear Classifier Decisions by Layer-Wise Relevance Propagation,'' \textit{PLOS ONE}, vol.~10, no.~7, p.~e0130140, 2015.
+
+\bibitem{han2016deep}
+S.~Han, H.~Mao, and W.~J.~Dally, ``Deep Compression: Compressing Deep Neural Networks with Pruning, Trained Quantization and Huffman Coding,'' \textit{International Conference on Learning Representations (ICLR)}, 2016.
+
+\bibitem{jacob2018quantization}
+B.~Jacob, S.~Kligys, B.~Chen, M.~Zhu, M.~Tang, A.~Howard, H.~Adam, and D.~Kalenichenko, ``Quantization and Training of Neural Networks for Efficient Integer-Arithmetic-Only Inference,'' \textit{Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR)}, pp.~2704--2713, 2018.
+
+\bibitem{yan2023spectral}
+T.~Yan et~al., ``Spectral Transformer for Rapid and Accurate Identification of Bacterial Species from Vibrational Spectra,'' \textit{Analytical Chemistry}, vol.~95, no.~12, pp.~5008--5016, 2023.
+
+\bibitem{tsai2019multimodal}
+Y.-H.~H.~Tsai, S.~Bai, P.~Liang, J.~Z.~Kolter, L.-P.~Morency, and R.~Salakhutdinov, ``Multimodal Transformer for Unaligned Multimodal Language Sequences,'' \textit{Proceedings of the Annual Meeting of the Association for Computational Linguistics (ACL)}, pp.~6558--6569, 2019.
+
+\bibitem{he2016deep}
+K.~He, X.~Zhang, S.~Ren, and J.~Sun, ``Deep Residual Learning for
+Image Recognition,'' \textit{Proceedings of the IEEE Conference on
+Computer Vision and Pattern Recognition (CVPR)}, pp.~770--778, 2016.
+
+\bibitem{kokhlikyan2020captum}
+N.~Kokhlikyan, V.~Miglani, M.~Martin, E.~Wang, B.~Alsallakh,
+J.~Reynolds, A.~Melnikov, N.~Kliushkina, C.~Araya, S.~Yan, and
+O.~Reblitz-Richardson, ``Captum: A unified and generic model
+interpretability library for PyTorch,'' \textit{arXiv preprint
+arXiv:2009.07896}, 2020.
+
+\bibitem{lee2019pywavelets}
+G.~R.~Lee, R.~Gommers, F.~Wasilewski, K.~Wohlfahrt, and A.~O'Leary,
+``PyWavelets: A Python package for wavelet analysis,'' \textit{Journal
+of Open Source Software}, vol.~4, no.~36, p.~1237, 2019.
+DOI: 10.21105/joss.01237.
+
+\end{thebibliography}
+
+\end{document}

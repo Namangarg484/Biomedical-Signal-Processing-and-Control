@@ -1,0 +1,41 @@
+# ======================================================================
+# PINNACLE v2 — Phase 2: Domain Adaptation Fine-Tuning
+# ======================================================================
+# Pre-trained backbone from Phase 1 (residual-gated, 92.20% val)
+# Fine-tune on target-domain finetune set (3K samples, 30 classes)
+# ======================================================================
+
+# --- Data ---
+data:
+  dir: "New data"
+  num_classes: 30
+  seq_len: 1000
+
+# --- Pre-trained model ---
+pretrained:
+  checkpoint: "outputs_30class_v2/checkpoints/best_model.pth"
+
+# --- Model ---
+model:
+  embed_dim: 128
+  dropout: 0.3
+  use_fusion: true
+
+# --- Fine-tuning strategy ---
+finetuning:
+  epochs: 30
+  batch_size: 16
+  lr: 0.00005
+  weight_decay: 0.001
+  scheduler: "cosine"
+  seed: 42
+  patience: 10
+  ema_decay: 0.999
+  freeze_backbone_epochs: 5
+  val_fraction: 0.2
+
+# --- Output ---
+output:
+  checkpoint_dir: "outputs_30class_finetune_v2/checkpoints"
+  log_dir: "outputs_30class_finetune_v2/logs"
+  figure_dir: "outputs_30class_finetune_v2/figures"
