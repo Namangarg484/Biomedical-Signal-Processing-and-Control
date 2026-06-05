@@ -25,7 +25,11 @@ pip install -r requirements.txt
 ## Data Download & Reproducibility
 > **Important Note for Reviewers:**
 > Due to file size constraints on GitHub, the large raw datasets and the trained model weights are not included in this repository directly.
-
+> 
+> **Data Link:** The 30-class Raman classification dataset used in this work (Bacteria-ID Benchmark Dataset) can be accessed and downloaded from:
+> [https://github.com/csho33/bacteria-ID](https://github.com/csho33/bacteria-ID)
+>
+> To reproduce the results, please download the dataset from the link above and place it in the appropriate data directories as defined in `config.yaml` before running the training or evaluation scripts.
 
 ## Usage
 1. Update the `config.yaml` file to point to your local data directories (e.g., `data_dir` and `image_dir`).
