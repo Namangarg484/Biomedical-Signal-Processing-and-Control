@@ -25,10 +25,7 @@ pip install -r requirements.txt
 ## Data Download & Reproducibility
 > **Important Note for Reviewers:**
 > Due to file size constraints on GitHub, the large raw datasets and the trained model weights are not included in this repository directly.
-> 
-> **Data Link:** *[Insert Link to Zenodo/Figshare/Mendeley Data here once uploaded]*
->
-> To reproduce the results, please download the dataset from the link above and place it in the appropriate data directories as defined in `config.yaml` before running the training or evaluation scripts.
+
 
 ## Usage
 1. Update the `config.yaml` file to point to your local data directories (e.g., `data_dir` and `image_dir`).
