@@ -57,9 +57,9 @@ architecture_search:
     25: [0, 1]
     35: [0, 1, 2]
 
-data_dir: '/content/local_data/'
-image_dir: '/content/local_data/'
-log_dir: '/content/drive/MyDrive/Ghanpriya Mam/pinnacle_v17_logs_90plus'
+data_dir: './data/'
+image_dir: './data/'
+log_dir: './outputs/logs'
 
 seed: 42
 deterministic: true

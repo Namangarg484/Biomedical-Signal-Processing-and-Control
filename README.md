@@ -28,16 +28,33 @@ pip install -r requirements.txt
 > 
 > **Data Link:** The 30-class Raman classification dataset used in this work (Bacteria-ID Benchmark Dataset) can be accessed and downloaded from:
 > [https://github.com/csho33/bacteria-ID](https://github.com/csho33/bacteria-ID)
->
-> To reproduce the results, please download the dataset from the link above and place it in the appropriate data directories as defined in `config.yaml` before running the training or evaluation scripts.
+
+### Data Preparation
+Once downloaded, place the dataset files into the `data/` directory. The codebase strictly expects the following filenames:
+- `X_2018_proc.npy`
+- `X_2019_proc.npy`
+- `y_2018clinical.npy`
+- `y_2019clinical.npy`
+
+*(Note: The `config.yaml` has been configured to look for these in the `./data/` folder).*
+
+### Preprocessing (Crucial Step)
+Because the SDR-Fusion architecture is a dual-stream model, it requires 2D Wavelet Scalograms alongside the 1D spectra. **You must generate the scalograms before training.**
+Run the wavelet generation script:
+```bash
+python scripts/generate_wavelets.py
+```
+This will generate `X_2018_wavelet.npy` and `X_2019_wavelet.npy` in your data directory.
 
 ## Usage
-1. Update the `config.yaml` file to point to your local data directories (e.g., `data_dir` and `image_dir`).
-2. To run the main training pipeline:
+1. To run the main training pipeline:
 ```bash
 python scripts/train.py --config config.yaml
 ```
-3. To generate the manuscript figures, execute the respective files in the `scripts/` directory:
+2. To generate the manuscript figures, execute the respective files in the `scripts/` directory:
 ```bash
 python scripts/generate_fig9_robustness.py
 ```
+
+## Note on Hardware Reproducibility
+While this codebase enforces strict seeding (`seed: 42`, `deterministic: true`), differences in hardware backends (e.g., Apple Silicon MPS vs NVIDIA CUDA) natively handle floating-point arithmetic differently within PyTorch's cross-attention blocks. Running this code on non-MPS hardware may result in nominal accuracy deviations ($\pm 0.1\%$ to $0.3\%$) from the exact figures reported in the manuscript.
