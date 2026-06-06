@@ -26,33 +26,61 @@ pip install -r requirements.txt
 > **Important Note for Reviewers:**
 > Due to file size constraints on GitHub, the large raw datasets and the trained model weights are not included in this repository directly.
 > 
-> **Data Link:** The 30-class Raman classification dataset used in this work (Bacteria-ID Benchmark Dataset) can be accessed and downloaded from:
+> **Data Link for 30-Class Benchmark:** The 30-class Raman classification dataset used in this work (Bacteria-ID Benchmark Dataset) can be accessed and downloaded from:
 > [https://github.com/csho33/bacteria-ID](https://github.com/csho33/bacteria-ID)
 
-### Data Preparation
-Once downloaded, place the dataset files into the `./data/` directory. For the **30-class benchmark**, the codebase strictly expects the following filenames:
+This codebase supports reproducing both the **Standard Benchmark (5-7 classes)** and the **Extended Taxonomy Benchmark (30 classes)**. Please place the downloaded dataset files into the `./data/` directory and follow the corresponding track below.
+
+---
+
+### Track A: Standard Benchmark (5-7 Classes)
+
+**1. Data Preparation**
+Ensure the following files are placed in the `./data/` directory:
+- `X_2018_proc.npy`
+- `X_2019_proc.npy`
+- `y_2018clinical.npy`
+- `y_2019clinical.npy`
+
+**2. Preprocessing (Scalogram Generation)**
+Generate the 2D Wavelet Scalograms required for the dual-stream model:
+```bash
+python scripts/generate_wavelets.py
+```
+
+**3. Training**
+Run the main training pipeline:
+```bash
+python scripts/train.py --config config.yaml
+```
+
+---
+
+### Track B: Extended Taxonomy Benchmark (30 Classes)
+
+**1. Data Preparation**
+Ensure the following files are placed in the `./data/` directory:
 - `X_reference.npy`
 - `y_reference.npy`
 - `X_test.npy`
 - `y_test.npy`
-- `wavenumbers.npy` (optional)
 
-*(Note: The `configs/30class.yaml` has been pre-configured to look for these in the `./data/` folder).*
-
-### Preprocessing (Crucial Step)
-Because the SDR-Fusion architecture is a dual-stream model, it requires 2D Wavelet Scalograms alongside the 1D spectra. **You must generate the scalograms before training.**
-Run the wavelet generation script specifically for the 30-class taxonomy:
+**2. Preprocessing (Scalogram Generation)**
+Generate the 2D Wavelet Scalograms specifically for the 30-class taxonomy:
 ```bash
 python scripts/generate_wavelets_30class.py
 ```
-This will generate `X_reference_wavelet.npy` and `X_test_wavelet.npy` directly in your `./data/` directory.
 
-## Usage
-1. To run the main training pipeline on the 30-class dataset:
+**3. Training**
+Run the 30-class specific training pipeline:
 ```bash
 python scripts/train_30class.py --config configs/30class.yaml
 ```
-2. To generate the manuscript figures, execute the respective files in the `scripts/` directory:
+
+---
+
+## Usage (Figure Generation)
+To generate the manuscript figures, execute the respective files in the `scripts/` directory:
 ```bash
 python scripts/generate_fig9_robustness.py
 ```
