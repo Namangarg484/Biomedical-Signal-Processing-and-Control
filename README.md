@@ -30,26 +30,27 @@ pip install -r requirements.txt
 > [https://github.com/csho33/bacteria-ID](https://github.com/csho33/bacteria-ID)
 
 ### Data Preparation
-Once downloaded, place the dataset files into the `data/` directory. The codebase strictly expects the following filenames:
-- `X_2018_proc.npy`
-- `X_2019_proc.npy`
-- `y_2018clinical.npy`
-- `y_2019clinical.npy`
+Once downloaded, place the dataset files into the `./data/` directory. For the **30-class benchmark**, the codebase strictly expects the following filenames:
+- `X_reference.npy`
+- `y_reference.npy`
+- `X_test.npy`
+- `y_test.npy`
+- `wavenumbers.npy` (optional)
 
-*(Note: The `config.yaml` has been configured to look for these in the `./data/` folder).*
+*(Note: The `configs/30class.yaml` has been pre-configured to look for these in the `./data/` folder).*
 
 ### Preprocessing (Crucial Step)
 Because the SDR-Fusion architecture is a dual-stream model, it requires 2D Wavelet Scalograms alongside the 1D spectra. **You must generate the scalograms before training.**
-Run the wavelet generation script:
+Run the wavelet generation script specifically for the 30-class taxonomy:
 ```bash
-python scripts/generate_wavelets.py
+python scripts/generate_wavelets_30class.py
 ```
-This will generate `X_2018_wavelet.npy` and `X_2019_wavelet.npy` in your data directory.
+This will generate `X_reference_wavelet.npy` and `X_test_wavelet.npy` directly in your `./data/` directory.
 
 ## Usage
-1. To run the main training pipeline:
+1. To run the main training pipeline on the 30-class dataset:
 ```bash
-python scripts/train.py --config config.yaml
+python scripts/train_30class.py --config configs/30class.yaml
 ```
 2. To generate the manuscript figures, execute the respective files in the `scripts/` directory:
 ```bash

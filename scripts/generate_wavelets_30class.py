@@ -35,7 +35,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Generate CWT scalograms for the 30-class dataset"
     )
-    parser.add_argument("--data-dir", default="New data", help="Data directory")
+    parser.add_argument("--data-dir", default="data/", help="Data directory")
     parser.add_argument("--img-size", type=int, default=128,
                         help="Scalogram image size (default: 128 to save disk)")
     parser.add_argument("--n-scales", type=int, default=256, help="Number of CWT scales")

@@ -7,7 +7,7 @@
 
 # --- Data ---
 data:
-  dir: "New data"
+  dir: "data/"
   num_classes: 30
   seq_len: 1000
 
